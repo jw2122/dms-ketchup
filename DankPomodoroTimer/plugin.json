@@ -1,0 +1,16 @@
+{
+    "id": "dmsKetchup",
+    "name": "DMS Ketchup",
+    "description": "Ketchup timer with break modal, sounds, and manual resume controls",
+    "version": "1.2.0",
+    "license": "MIT",
+    "author": "Virtual Wolf 369",
+    "icon": "timer",
+    "firstParty": true,
+    "component": "./DMSKetchupWidget.qml",
+    "settings": "./DMSKetchupSettings.qml",
+    "permissions": [
+        "settings_read",
+        "settings_write"
+    ]
+}
