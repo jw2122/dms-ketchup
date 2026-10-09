@@ -1,9 +1,12 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import qs.Common
 import qs.Services
 import qs.Widgets
 import qs.Modules.Plugins
+import Quickshell.Io
+import "./dms-common"
 import "."
 
 PluginSettings {
@@ -14,6 +17,90 @@ PluginSettings {
 
     id: root
     pluginId: "dmsKetchup"
+
+    property var stats: ({ today: 0, week: 0, total: 0, contributors: [] })
+
+    function formatDateKey(date) {
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        return year + "-" + month + "-" + day;
+    }
+
+    function refreshStats() {
+        if (!pluginService)
+            return;
+        const today = new Date();
+        const todayKey = root.formatDateKey(today);
+        let weekTotal = 0;
+        let contributors = [];
+
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(today);
+            date.setDate(today.getDate() - i);
+            const dateKey = root.formatDateKey(date);
+            const count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey, 0) || 0;
+            weekTotal += count;
+            if (count > 0) {
+                contributors.push({ date: dateKey, count: count });
+            }
+        }
+
+        contributors.sort((a, b) => b.count - a.count);
+
+        let total = 0;
+        for (let d = 0; d < 365; d++) {
+            const date = new Date(today);
+            date.setDate(today.getDate() - d);
+            const dateKey = root.formatDateKey(date);
+            const count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey, 0) || 0;
+            total += count;
+        }
+
+        root.stats = {
+            today: pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + todayKey, 0) || 0,
+            week: weekTotal,
+            total: total,
+            contributors: contributors
+        };
+    }
+
+    function resetStats() {
+        if (!pluginService)
+            return;
+        const today = new Date();
+        for (let d = 0; d < 400; d++) {
+            const date = new Date(today);
+            date.setDate(today.getDate() - d);
+            const dateKey = root.formatDateKey(date);
+            pluginService.removePluginStateKey("dmsKetchup", "completedPomodoros-" + dateKey);
+        }
+        PluginService.setGlobalVar("dmsKetchup", "completedPomodoros", 0);
+        root.refreshStats();
+    }
+
+    Timer {
+        id: statsRefreshTimer
+        interval: 10000
+        running: true
+        repeat: true
+        onTriggered: root.refreshStats()
+    }
+
+    Timer {
+        id: statsInitTimer
+        interval: 500
+        repeat: true
+        running: pluginService === null
+        onTriggered: {
+            if (pluginService) {
+                running = false;
+                root.refreshStats();
+            }
+        }
+    }
+
+    Component.onCompleted: root.refreshStats()
 
     StyledText {
         width: parent.width
@@ -135,6 +222,160 @@ PluginSettings {
                 label: root.tr("Do Not Disturb Work", "No molestar durante el trabajo")
                 description: root.tr("Automatically enable Do Not Disturb mode during work sessions", "Activa automáticamente el modo No molestar durante las sesiones de trabajo")
                 defaultValue: false
+            }
+        }
+    }
+
+    StyledRect {
+        width: parent.width
+        height: preWarningColumn.implicitHeight + Theme.spacingL * 2
+        radius: Theme.cornerRadius
+        color: Theme.surfaceContainerHigh
+
+        Column {
+            id: preWarningColumn
+            anchors.fill: parent
+            anchors.margins: Theme.spacingL
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: root.tr("Pre-Warning", "Pre-aviso")
+                font.pixelSize: Theme.fontSizeMedium
+                font.weight: Font.Medium
+                color: Theme.surfaceText
+            }
+
+            ToggleSetting {
+                settingKey: "enablePreWarning"
+                label: root.tr("Pre-warning toast", "Aviso previo")
+                description: root.tr("Show a toast shortly before a break starts", "Muestra un aviso poco antes de que empiece un descanso")
+                defaultValue: true
+            }
+
+            SliderSetting {
+                settingKey: "preWarningTime"
+                label: root.tr("Pre-warning lead time", "Antelación del aviso")
+                description: root.tr("Seconds before the break starts", "Segundos antes de que empiece el descanso")
+                defaultValue: 10
+                minimum: 5
+                maximum: 60
+                unit: "s"
+            }
+
+            SelectionSetting {
+                settingKey: "preWarningAlignment"
+                label: root.tr("Toast position", "Posición del aviso")
+                description: root.tr("Corner where the pre-warning toast appears", "Esquina donde aparece el aviso previo")
+                options: [
+                    { label: root.tr("Bottom right", "Abajo a la derecha"), value: "bottom-right" },
+                    { label: root.tr("Bottom left", "Abajo a la izquierda"), value: "bottom-left" },
+                    { label: root.tr("Top right", "Arriba a la derecha"), value: "top-right" },
+                    { label: root.tr("Top left", "Arriba a la izquierda"), value: "top-left" },
+                    { label: root.tr("Bottom center", "Abajo en el centro"), value: "bottom-center" },
+                    { label: root.tr("Top center", "Arriba en el centro"), value: "top-center" }
+                ]
+                defaultValue: "bottom-right"
+            }
+        }
+    }
+
+    SettingsCard {
+        SectionTitle {
+            text: root.tr("Statistics", "Statistiken")
+            icon: "bar_chart"
+        }
+
+        Column {
+            width: parent.width - Theme.spacingM * 2
+            x: Theme.spacingM
+            spacing: Theme.spacingS
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingS
+
+                InfoTile {
+                    width: (parent.width - parent.spacing) / 2
+                    label: root.tr("Today", "Hoy")
+                    value: root.stats.today + " " + root.tr("sessions", "Sesiones")
+                    iconName: "today"
+                    accentColor: Theme.primary
+                }
+
+                InfoTile {
+                    width: (parent.width - parent.spacing) / 2
+                    label: root.tr("This Week", "Diese Woche")
+                    value: root.stats.week + " " + root.tr("sessions", "Sesiones")
+                    iconName: "date_range"
+                    accentColor: Theme.info
+                }
+            }
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingS
+
+                InfoTile {
+                    width: (parent.width - parent.spacing) / 2
+                    label: root.tr("Total (365 days)", "Gesamt (365 Tage)")
+                    value: String(root.stats.total)
+                    iconName: "analytics"
+                    accentColor: Theme.success
+                }
+
+                InfoTile {
+                    width: (parent.width - parent.spacing) / 2
+                    label: root.tr("Best Day", "Bester Tag")
+                    value: root.stats.contributors.length > 0
+                        ? root.stats.contributors[0].count + " (" + root.stats.contributors[0].date + ")"
+                        : "—"
+                    iconName: "emoji_events"
+                    accentColor: Theme.warning
+                }
+            }
+
+            StyledText {
+                text: root.tr("Top Days", "Top-Tage")
+                font.pixelSize: Theme.fontSizeSmall
+                font.weight: Font.Medium
+                color: Theme.surfaceVariantText
+            }
+
+            Repeater {
+                model: root.stats.contributors.slice(0, 5)
+
+                InfoTile {
+                    width: parent.width
+                    label: modelData.date
+                    value: modelData.count + " " + root.tr("sessions", "Sesiones")
+                    iconName: "calendar_month"
+                    accentColor: Theme.primary
+                }
+            }
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingS
+
+                DankButton {
+                    text: root.tr("Refresh", "Aktualisieren")
+                    iconName: "refresh"
+                    backgroundColor: Theme.surfaceContainerHigh
+                    textColor: Theme.surfaceText
+                    width: (parent.width - parent.spacing) / 2
+                    buttonHeight: 32
+                    onClicked: root.refreshStats()
+                }
+
+                DankButton {
+                    text: root.tr("Reset Stats", "Statistiken zurücksetzen")
+                    iconName: "delete_sweep"
+                    backgroundColor: Theme.withAlpha(Theme.error, 0.15)
+                    textColor: Theme.error
+                    width: (parent.width - parent.spacing) / 2
+                    buttonHeight: 32
+                    onClicked: root.resetStats()
+                }
             }
         }
     }
