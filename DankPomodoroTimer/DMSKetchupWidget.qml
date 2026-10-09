@@ -12,9 +12,17 @@ import "."
 PluginComponent {
     id: root
 
-    property int workDuration: pluginData.workDuration || 25
-    property int shortBreakDuration: pluginData.shortBreakDuration || 5
-    property int longBreakDuration: pluginData.longBreakDuration || 15
+    function toDuration(value, fallback) {
+        if (value === undefined || value === null || value === "")
+            return fallback;
+        const normalized = String(value).replace(",", ".");
+        const parsed = parseFloat(normalized);
+        return isNaN(parsed) || parsed < 0 ? fallback : parsed;
+    }
+
+    property real workDuration: toDuration(pluginData.workDuration, 25)
+    property real shortBreakDuration: toDuration(pluginData.shortBreakDuration, 5)
+    property real longBreakDuration: toDuration(pluginData.longBreakDuration, 15)
     property bool autoStartBreaks: pluginData.autoStartBreaks ?? false
     property bool autoStartPomodoros: pluginData.autoStartPomodoros ?? false
     property bool autoSetDND: pluginData.autoSetDND ?? false
@@ -23,9 +31,29 @@ PluginComponent {
     property bool fullscreenBreakModalEnabled: pluginData.fullscreenBreakModalEnabled ?? true
     property bool requireManualContinueAfterBreak: pluginData.requireManualContinueAfterBreak ?? true
     property bool soundsEnabled: pluginData.soundsEnabled ?? true
+    property bool enablePreWarning: pluginData.enablePreWarning ?? true
+    property int preWarningTime: pluginData.preWarningTime ?? 10
+    property real preWarningOpacity: (pluginData.preWarningOpacity ?? 100) / 100
+    property bool isPreWarning: false
+    property var preWarningWindow: null
+    property int preWarningCountdown: 0
     property string uiLanguage: "en"
     property string startWorkSoundUrl: "file:///usr/share/sounds/freedesktop/stereo/message.oga"
     property string endWorkSoundUrl: "file:///usr/share/sounds/freedesktop/stereo/message.oga"
+    property bool showSecondsOnly: false
+    property int blinkCounter: 0
+    property bool blinkVisible: true
+
+    Timer {
+        id: blinkTimer
+        interval: 200
+        repeat: true
+        running: showSecondsOnly
+        onTriggered: {
+            blinkCounter = (blinkCounter + 1) % 5;
+            blinkVisible = blinkCounter < 4;
+        }
+    }
 
     function tr(en, es) {
         const localeName = (typeof I18n !== "undefined" && I18n.locale) ? I18n.locale().name : "en-US";
@@ -54,6 +82,7 @@ PluginComponent {
             globalCompletedPomodoros.set(pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + currentDateKey));
             loadLast7Days();
             closeBreakModal();
+            root.closePreWarning();
             root.timerDisplayActive = false;
             root.startupModalSuppression = false;
         globalTimerState.set("work");
@@ -68,6 +97,7 @@ PluginComponent {
 
     Component.onCompleted: {
         closeBreakModal();
+        root.closePreWarning();
         startupGuard = true;
         startupModalSuppression = true;
         sessionLocked = false;
@@ -264,22 +294,33 @@ PluginComponent {
 
     property string instanceId: Math.random().toString(36).substring(2)
 
-    Timer {
-        id: pomodoroTimer
-        interval: 1000
-        repeat: true
-        running: globalIsRunning.value && globalTimerOwnerId.value === root.instanceId
-        onTriggered: {
-            if (globalRemainingSeconds.value > 0) {
-                globalRemainingSeconds.set(globalRemainingSeconds.value - 1);
-            } else {
-                root.timerComplete();
+        Timer {
+            id: pomodoroTimer
+            interval: 1000
+            repeat: true
+            running: globalIsRunning.value && globalTimerOwnerId.value === root.instanceId
+            onTriggered: {
+                if (globalRemainingSeconds.value > 0) {
+                    globalRemainingSeconds.set(globalRemainingSeconds.value - 1);
+                    root.preWarningCountdown = globalRemainingSeconds.value;
+                    if (globalRemainingSeconds.value < 60) {
+                        root.showSecondsOnly = true;
+                        root.blinkVisible = true;
+                    } else {
+                        root.showSecondsOnly = false;
+                    }
+                    if (root.enablePreWarning && !root.isPreWarning && globalTimerState.value === "work" && globalRemainingSeconds.value === root.preWarningTime) {
+                        root.showPreWarning();
+                    }
+                } else {
+                    root.timerComplete();
+                }
             }
         }
-    }
 
     function timerComplete() {
         globalIsRunning.set(false);
+        root.closePreWarning();
 
         if (globalTimerState.value === "work") {
             globalCompletedPomodoros.set(globalCompletedPomodoros.value + 1);
@@ -400,26 +441,76 @@ PluginComponent {
         root.startWork(true, true);
     }
 
+    function showPreWarning() {
+        if (root.isPreWarning || !root.enablePreWarning)
+            return;
+        root.isPreWarning = true;
+        if (root.preWarningWindow) {
+            root.preWarningWindow.destroy();
+            root.preWarningWindow = null;
+        }
+        const toastComponent = Qt.createComponent("DMSKetchupPreWarningToast.qml");
+        if (toastComponent.status === Component.Ready) {
+            root.preWarningWindow = toastComponent.createObject(root, { "pluginRoot": root });
+            if (!root.preWarningWindow) {
+                console.log("[dms-ketchup] failed to create pre-warning toast");
+                root.isPreWarning = false;
+            }
+        } else {
+            console.log("[dms-ketchup] pre-warning toast error:", toastComponent.errorString());
+            root.isPreWarning = false;
+        }
+    }
+
+    function closePreWarning() {
+        if (root.preWarningWindow) {
+            root.preWarningWindow.destroy();
+            root.preWarningWindow = null;
+        }
+        root.isPreWarning = false;
+    }
+
+    function snoozeWork() {
+        root.closePreWarning();
+        if (globalTimerState.value === "work") {
+            globalTotalSeconds.set(globalTotalSeconds.value + 300);
+            globalRemainingSeconds.set(globalRemainingSeconds.value + 300);
+        }
+    }
+
+    function skipWork() {
+        root.closePreWarning();
+        if (globalTimerState.value !== "work")
+            return;
+        globalIsRunning.set(false);
+        const isLongBreak = globalCompletedPomodoros.value % 4 === 0;
+        if (isLongBreak)
+            root.startLongBreak(true, true, true);
+        else
+            root.startShortBreak(true, true, true);
+    }
+
     function startWork(autoStart, playSoundNow = true) {
         globalTimerState.set("work");
         globalTotalSeconds.set(root.workDuration * 60);
         globalRemainingSeconds.set(globalTotalSeconds.value);
+        root.showSecondsOnly = globalRemainingSeconds.value < 60;
+        root.preWarningCountdown = globalTotalSeconds.value;
+        root.closePreWarning();
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
         if ((autoStart ?? false) || playSoundNow)
             root.timerDisplayActive = true;
-        if ((autoStart ?? false) || playSoundNow)
-            root.timerDisplayActive = true;
-        if (root.autoSetDND) {
+        if (root.autoSetDND)
             SessionData.setDoNotDisturb(autoStart ?? false);
-        }
         if (playSoundNow)
             root.playTimerSound("start");
-        if (!root.fullscreenBreakModalEnabled)
-            closeBreakModal();
+        root.breakModalArmed = false;
+        closeBreakModal();
     }
 
     function startShortBreak(autoStart, openModal = false, playSoundNow = true) {
+        root.closePreWarning();
         console.log("[pomodoro-debug] startShortBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
         if (root.autoSetDND) {
             SessionData.setDoNotDisturb(false);
@@ -428,6 +519,7 @@ PluginComponent {
         globalTimerState.set("shortBreak");
         globalTotalSeconds.set(root.shortBreakDuration * 60);
         globalRemainingSeconds.set(globalTotalSeconds.value);
+        root.showSecondsOnly = globalRemainingSeconds.value < 60;
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
         if ((autoStart ?? false) || playSoundNow)
@@ -443,6 +535,7 @@ PluginComponent {
     }
 
     function startLongBreak(autoStart, openModal = false, playSoundNow = true) {
+        root.closePreWarning();
         console.log("[pomodoro-debug] startLongBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
         if (root.autoSetDND) {
             SessionData.setDoNotDisturb(false);
@@ -451,6 +544,7 @@ PluginComponent {
         globalTimerState.set("longBreak");
         globalTotalSeconds.set(root.longBreakDuration * 60);
         globalRemainingSeconds.set(globalTotalSeconds.value);
+        root.showSecondsOnly = globalRemainingSeconds.value < 60;
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
         if ((autoStart ?? false) || playSoundNow)
@@ -481,10 +575,12 @@ PluginComponent {
 
     function resetTimer() {
         globalIsRunning.set(false);
+        root.closePreWarning();
         if (root.autoSetDND && globalTimerState.value === "work") {
             SessionData.setDoNotDisturb(false);
         }
         globalRemainingSeconds.set(globalTotalSeconds.value);
+        root.showSecondsOnly = globalRemainingSeconds.value < 60;
         root.timerDisplayActive = false;
         closeBreakModal();
     }
@@ -493,6 +589,28 @@ PluginComponent {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return isVertical ? mins + "\n" + (secs < 10 ? "0" : "") + secs : mins + ":" + (secs < 10 ? "0" : "") + secs;
+    }
+
+    function getCountdownText(seconds, isVertical = false, barOnlyMinutes = false) {
+        if (!globalIsRunning.value && seconds === 0) {
+            const totalSecs = root.workDuration * 60;
+            const totalMins = Math.floor(totalSecs / 60);
+            const secs = totalSecs % 60;
+            return isVertical ? totalMins + "\n" + (secs < 10 ? "0" : "") + secs : totalMins + ":" + (secs < 10 ? "0" : "") + secs;
+        }
+        if (seconds < 60 && showSecondsOnly) {
+            return seconds.toString();
+        }
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        if (seconds >= 60 && barOnlyMinutes) {
+            return mins.toString();
+        }
+        if (isVertical) {
+            return mins + "\n" + (secs < 10 ? "0" : "") + secs;
+        } else {
+            return mins + ":" + (secs < 10 ? "0" : "") + secs;
+        }
     }
 
     function getStateColor() {
@@ -511,14 +629,6 @@ PluginComponent {
         if (globalTimerState.value === "longBreak")
             return "weekend";
         return "coffee";
-    }
-
-    function getInactiveIconColor() {
-        return Theme.widgetIconColor;
-    }
-
-    function getInactiveTomatoIcon() {
-        return Theme.isLightMode ? Qt.resolvedUrl("./assets/tomato-outline-light.svg") : Qt.resolvedUrl("./assets/tomato-outline-dark.svg");
     }
 
     function hasActiveTimer() {
@@ -566,67 +676,51 @@ PluginComponent {
         }
     }
 
-    horizontalBarPill: Component {
-        Row {
-            spacing: Theme.spacingXS
+horizontalBarPill: Component {
+         Row {
+             spacing: Theme.spacingXS
 
-            Loader {
-                active: !root.timerDisplayActive
-                sourceComponent: DankSVGIcon {
-                    source: root.getInactiveTomatoIcon()
-                    size: Theme.iconSize - 6
-                }
-            }
+             DankIcon {
+                 name: root.timerDisplayActive ? root.getStateIcon() : "timer"
+                 size: Theme.barIconSize(root.barThickness)
+                 color: root.timerDisplayActive ? root.getStateColor() : Theme.widgetIconColor
+                 anchors.verticalCenter: parent.verticalCenter
+             }
 
-            DankIcon {
-                visible: root.timerDisplayActive
-                name: root.getStateIcon()
-                size: Theme.iconSize - 6
-                color: root.getStateColor()
-                anchors.verticalCenter: parent.verticalCenter
-            }
+             StyledText {
+                 visible: root.timerDisplayActive
+                 text: root.getCountdownText(globalRemainingSeconds.value, false, true)
+                 font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
+                 font.weight: Font.Medium
+                 color: root.showSecondsOnly ? Theme.primary : Theme.surfaceVariantText
+                 opacity: root.showSecondsOnly ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
+                 anchors.verticalCenter: parent.verticalCenter
+             }
+         }
+     }
 
-            StyledText {
-                visible: root.timerDisplayActive
-                text: root.formatTime(globalRemainingSeconds.value)
-                font.pixelSize: Theme.fontSizeSmall
-                font.weight: Font.Medium
-                color: Theme.surfaceVariantText
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-    }
+     verticalBarPill: Component {
+         Column {
+             spacing: Theme.spacingXS
 
-    verticalBarPill: Component {
-        Column {
-            spacing: Theme.spacingXS
+             DankIcon {
+                 name: root.timerDisplayActive ? root.getStateIcon() : "timer"
+                 size: Theme.barIconSize(root.barThickness)
+                 color: root.timerDisplayActive ? root.getStateColor() : Theme.widgetIconColor
+                 anchors.horizontalCenter: parent.horizontalCenter
+             }
 
-            Loader {
-                active: !root.timerDisplayActive
-                sourceComponent: DankSVGIcon {
-                    source: root.getInactiveTomatoIcon()
-                    size: Theme.iconSize - 6
-                }
-            }
-
-            DankIcon {
-                visible: root.timerDisplayActive
-                name: root.getStateIcon()
-                size: Theme.iconSize - 6
-                color: root.getStateColor()
-                anchors.horizontalCenter: parent.horizontalCenter
-            }
-
-            StyledText {
-                visible: root.timerDisplayActive
-                text: root.formatTime(globalRemainingSeconds.value, true)
-                font.pixelSize: Theme.fontSizeSmall
-                font.weight: Font.Medium
-                color: Theme.surfaceVariantText
-                anchors.horizontalCenter: parent.horizontalCenter
-            }
-        }
-    }
+             StyledText {
+                 visible: root.timerDisplayActive
+                 text: root.getCountdownText(globalRemainingSeconds.value, true, true)
+                 font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
+                 font.weight: Font.Medium
+                 color: root.showSecondsOnly ? Theme.primary : Theme.surfaceVariantText
+                 opacity: root.showSecondsOnly ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
+                 anchors.horizontalCenter: parent.horizontalCenter
+             }
+         }
+     }
 
     popoutContent: Component {
         PopoutComponent {
@@ -675,7 +769,7 @@ PluginComponent {
                                 const centerX = width / 2;
                                 const centerY = height / 2;
                                 const radius = (width - 8) / 2;
-                                const progress = globalRemainingSeconds.value / globalTotalSeconds.value;
+                                const progress = (globalTotalSeconds.value > 0) ? globalRemainingSeconds.value / globalTotalSeconds.value : 0;
                                 const startAngle = -Math.PI / 2;
                                 const endAngle = startAngle + (2 * Math.PI * progress);
                                 ctx.arc(centerX, centerY, radius, startAngle, endAngle, false);
@@ -695,7 +789,7 @@ PluginComponent {
                             spacing: Theme.spacingXS
 
                             StyledText {
-                                text: root.formatTime(globalRemainingSeconds.value)
+                                text: root.getCountdownText(globalRemainingSeconds.value)
                                 font.pixelSize: 36
                                 font.weight: Font.Bold
                                 color: root.getStateColor()
@@ -946,6 +1040,5 @@ PluginComponent {
         timerState: globalTimerState.value
         remainingSeconds: globalRemainingSeconds.value
         totalSeconds: globalTotalSeconds.value
-        breakLabel: globalTimerState.value === "longBreak" ? "Long break" : "Short break"
     }
 }
