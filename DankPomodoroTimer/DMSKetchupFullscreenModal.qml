@@ -13,8 +13,7 @@ Item {
     property string timerState: "work"
     property int remainingSeconds: 0
     property int totalSeconds: 0
-    property real barProgress: 1
-    property int lastSecondMs: 0
+    property real barProgress: totalSeconds > 0 ? remainingSeconds / totalSeconds : 1
 
     visible: isOpen
 
@@ -37,38 +36,6 @@ Item {
 
     Component.onCompleted: {
         currentTip = tips[Math.floor(Math.random() * tips.length)];
-        lastSecondMs = Date.now();
-    }
-
-    Timer {
-        id: progressUpdateTimer
-        interval: 33
-        repeat: true
-        running: rootOverlay.visible && rootOverlay.phase !== "complete"
-        onRunningChanged: {
-            if (running) {
-                lastSecondMs = Date.now();
-            }
-        }
-        onTriggered: {
-            var total = rootOverlay.totalSeconds;
-            if (total <= 0) {
-                rootOverlay.barProgress = 1;
-                return;
-            }
-            if (rootOverlay.lastSecondMs > 0) {
-                var elapsed = (Date.now() - rootOverlay.lastSecondMs) / 1000;
-                var cur = rootOverlay.remainingSeconds - elapsed;
-                if (cur < 0) cur = 0;
-                rootOverlay.barProgress = cur / total;
-            } else {
-                rootOverlay.barProgress = rootOverlay.remainingSeconds / total;
-            }
-        }
-    }
-
-    onRemainingSecondsChanged: {
-        lastSecondMs = Date.now();
     }
 
     function breakTitle() {
@@ -193,6 +160,7 @@ Item {
                             height: parent.height
                             radius: 4
                             color: Theme.primary
+                            Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
                         }
                     }
 
