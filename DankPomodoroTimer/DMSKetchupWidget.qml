@@ -40,18 +40,15 @@ PluginComponent {
     property string uiLanguage: "en"
     property string startWorkSoundUrl: "file:///usr/share/sounds/freedesktop/stereo/message.oga"
     property string endWorkSoundUrl: "file:///usr/share/sounds/freedesktop/stereo/message.oga"
-    property bool showSecondsOnly: false
-    property int blinkCounter: 0
     property bool blinkVisible: true
 
     Timer {
         id: blinkTimer
         interval: 200
         repeat: true
-        running: showSecondsOnly
+        running: globalShowSecondsOnly.value
         onTriggered: {
-            blinkCounter = (blinkCounter + 1) % 5;
-            blinkVisible = blinkCounter < 4;
+            blinkVisible = Math.floor(Date.now() / 200) % 5 < 4;
         }
     }
 
@@ -60,7 +57,6 @@ PluginComponent {
         return localeName.toLowerCase().startsWith("es") ? es : en;
     }
     property bool breakModalOpen: false
-    property bool timerDisplayActive: false
     property string breakModalPhase: "hidden"
     property bool startupGuard: true
     property bool startupModalSuppression: true
@@ -69,6 +65,9 @@ PluginComponent {
     property bool breakModalArmed: false
     property int bootModalSuppressUntil: 0
     property string deferredBreakModalPhase: ""
+    property bool awayActive: false
+    property int awayStartMs: 0
+    property var awaySnapshot: null
 
     onPluginServiceChanged: {
         if (pluginService) {
@@ -83,14 +82,13 @@ PluginComponent {
             loadLast7Days();
             closeBreakModal();
             root.closePreWarning();
-            root.timerDisplayActive = false;
+            globalTimerDisplayActive.set(false);
             root.startupModalSuppression = false;
         globalTimerState.set("work");
             globalTotalSeconds.set(root.workDuration * 60);
             globalRemainingSeconds.set(globalTotalSeconds.value);
             globalTimerOwnerId.set(root.instanceId);
             globalIsRunning.set(false);
-            initGuardTimer.restart();
             lockStateProbeTimer.restart();
         }
     }
@@ -103,8 +101,7 @@ PluginComponent {
         sessionLocked = false;
         breakModalArmed = false;
         bootModalSuppressUntil = Date.now() + 20000;
-        deferredBreakModalPhase = "";
-        initGuardTimer.restart();
+            deferredBreakModalPhase = "";
         lockStateProbeTimer.restart();
     }
 
@@ -134,6 +131,9 @@ PluginComponent {
                 if (locked) {
                     if (root.breakModalOpen)
                         root.closeBreakModal();
+                    beginAway();
+                } else if (changed) {
+                    endAway();
                 }
             }
         }
@@ -152,6 +152,25 @@ PluginComponent {
                 root.lockProbeBusy = true;
                 lockStateProbeProcess.running = true;
             }
+        }
+    }
+
+    Connections {
+        target: SessionService
+        ignoreUnknownSignals: true
+        function onPreparingForSleepChanged() {
+            if (SessionService.preparingForSleep)
+                beginAway();
+        }
+        function onSessionLocked() {
+            beginAway();
+        }
+        function onSessionUnlocked() {
+            endAway();
+        }
+        function onSessionResumed() {
+            if (!SessionService.locked && !SettingsData.lockBeforeSuspend)
+                endAway();
         }
     }
 
@@ -292,6 +311,18 @@ PluginComponent {
         defaultValue: ""
     }
 
+    PluginGlobalVar {
+        id: globalTimerDisplayActive
+        varName: "timerDisplayActive"
+        defaultValue: false
+    }
+
+    PluginGlobalVar {
+        id: globalShowSecondsOnly
+        varName: "showSecondsOnly"
+        defaultValue: false
+    }
+
     property string instanceId: Math.random().toString(36).substring(2)
 
         Timer {
@@ -299,15 +330,15 @@ PluginComponent {
             interval: 1000
             repeat: true
             running: globalIsRunning.value && globalTimerOwnerId.value === root.instanceId
-            onTriggered: {
-                if (globalRemainingSeconds.value > 0) {
+        onTriggered: {
+            if (globalRemainingSeconds.value > 0) {
                     globalRemainingSeconds.set(globalRemainingSeconds.value - 1);
                     root.preWarningCountdown = globalRemainingSeconds.value;
                     if (globalRemainingSeconds.value < 60) {
-                        root.showSecondsOnly = true;
+                        globalShowSecondsOnly.set(true);
                         root.blinkVisible = true;
                     } else {
-                        root.showSecondsOnly = false;
+                        globalShowSecondsOnly.set(false);
                     }
                     if (root.enablePreWarning && !root.isPreWarning && globalTimerState.value === "work" && globalRemainingSeconds.value === root.preWarningTime) {
                         root.showPreWarning();
@@ -490,17 +521,70 @@ PluginComponent {
             root.startShortBreak(true, true, true);
     }
 
+    function beginAway() {
+        if (awayActive || globalTimerState.value !== "work")
+            return;
+        awaySnapshot = {
+            remaining: globalRemainingSeconds.value,
+            total: globalTotalSeconds.value,
+            wasRunning: globalIsRunning.value
+        };
+        awayActive = true;
+        awayStartMs = Date.now();
+        globalIsRunning.set(false);
+        root.closePreWarning();
+        console.info("[dms-ketchup] beginAway", "remaining=", awaySnapshot.remaining, "total=", awaySnapshot.total, "wasRunning=", awaySnapshot.wasRunning);
+    }
+
+    function endAway() {
+        if (!awayActive)
+            return;
+        const awayMs = Date.now() - awayStartMs;
+        const snapshot = awaySnapshot;
+        awayActive = false;
+        awayStartMs = 0;
+        awaySnapshot = null;
+        console.info("[dms-ketchup] endAway", "awayMs=", awayMs);
+        applyAwayLogic(awayMs, snapshot);
+    }
+
+    function applyAwayLogic(awayMs, snapshot) {
+        if (awayMs >= longBreakDuration * 60 * 1000) {
+            console.info("[dms-ketchup] applyAwayLogic", ">= long break: reset cycle + fresh session");
+            resetPomodoroCycle();
+            root.startWork(true, true);
+        } else if (awayMs >= shortBreakDuration * 60 * 1000) {
+            console.info("[dms-ketchup] applyAwayLogic", ">= short break: fresh session");
+            root.startWork(true, true);
+        } else if (snapshot) {
+            console.info("[dms-ketchup] applyAwayLogic", "< short break: restore countdown");
+            globalTotalSeconds.set(snapshot.total);
+            globalRemainingSeconds.set(snapshot.remaining);
+            if (snapshot.wasRunning)
+                globalTimerOwnerId.set(root.instanceId);
+            globalIsRunning.set(snapshot.wasRunning);
+        }
+    }
+
+    function resetPomodoroCycle() {
+        globalCompletedPomodoros.set(0);
+        if (pluginService) {
+            pluginService.savePluginState("dmsKetchup", "completedPomodoros-" + formatDateKey(new Date()), 0);
+            loadLast7Days();
+        }
+    }
+
     function startWork(autoStart, playSoundNow = true) {
         globalTimerState.set("work");
         globalTotalSeconds.set(root.workDuration * 60);
         globalRemainingSeconds.set(globalTotalSeconds.value);
-        root.showSecondsOnly = globalRemainingSeconds.value < 60;
+        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
         root.preWarningCountdown = globalTotalSeconds.value;
         root.closePreWarning();
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
         if ((autoStart ?? false) || playSoundNow)
-            root.timerDisplayActive = true;
+            globalTimerDisplayActive.set(true);
         if (root.autoSetDND)
             SessionData.setDoNotDisturb(autoStart ?? false);
         if (playSoundNow)
@@ -519,11 +603,11 @@ PluginComponent {
         globalTimerState.set("shortBreak");
         globalTotalSeconds.set(root.shortBreakDuration * 60);
         globalRemainingSeconds.set(globalTotalSeconds.value);
-        root.showSecondsOnly = globalRemainingSeconds.value < 60;
+        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
         if ((autoStart ?? false) || playSoundNow)
-            root.timerDisplayActive = true;
+            globalTimerDisplayActive.set(true);
         if (playSoundNow)
             root.playTimerSound("start");
         if (openModal || (autoStart ?? false)) {
@@ -544,11 +628,11 @@ PluginComponent {
         globalTimerState.set("longBreak");
         globalTotalSeconds.set(root.longBreakDuration * 60);
         globalRemainingSeconds.set(globalTotalSeconds.value);
-        root.showSecondsOnly = globalRemainingSeconds.value < 60;
+        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
         if ((autoStart ?? false) || playSoundNow)
-            root.timerDisplayActive = true;
+            globalTimerDisplayActive.set(true);
         if (playSoundNow)
             root.playTimerSound("start");
         if (openModal || (autoStart ?? false)) {
@@ -562,7 +646,7 @@ PluginComponent {
     function toggleTimer() {
         if (!globalIsRunning.value) {
             globalTimerOwnerId.set(root.instanceId);
-            root.timerDisplayActive = true;
+            globalTimerDisplayActive.set(true);
             if (root.fullscreenBreakModalEnabled && globalTimerState.value !== "work") {
                 root.openBreakModal("running");
             }
@@ -580,8 +664,8 @@ PluginComponent {
             SessionData.setDoNotDisturb(false);
         }
         globalRemainingSeconds.set(globalTotalSeconds.value);
-        root.showSecondsOnly = globalRemainingSeconds.value < 60;
-        root.timerDisplayActive = false;
+        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
+        globalTimerDisplayActive.set(false);
         closeBreakModal();
     }
 
@@ -598,7 +682,7 @@ PluginComponent {
             const secs = totalSecs % 60;
             return isVertical ? totalMins + "\n" + (secs < 10 ? "0" : "") + secs : totalMins + ":" + (secs < 10 ? "0" : "") + secs;
         }
-        if (seconds < 60 && showSecondsOnly) {
+        if (seconds < 60 && globalShowSecondsOnly.value) {
             return seconds.toString();
         }
         const mins = Math.floor(seconds / 60);
@@ -632,7 +716,7 @@ PluginComponent {
     }
 
     function hasActiveTimer() {
-        return root.timerDisplayActive;
+        return globalTimerDisplayActive.value;
     }
 
     IpcHandler {
@@ -680,22 +764,22 @@ horizontalBarPill: Component {
          Row {
              spacing: Theme.spacingXS
 
-             DankIcon {
-                 name: root.timerDisplayActive ? root.getStateIcon() : "timer"
-                 size: Theme.barIconSize(root.barThickness)
-                 color: root.timerDisplayActive ? root.getStateColor() : Theme.widgetIconColor
-                 anchors.verticalCenter: parent.verticalCenter
-             }
+              DankIcon {
+                  name: globalTimerDisplayActive.value ? root.getStateIcon() : "timer"
+                  size: Theme.barIconSize(root.barThickness)
+                  color: globalTimerDisplayActive.value ? root.getStateColor() : Theme.widgetIconColor
+                  anchors.verticalCenter: parent.verticalCenter
+              }
 
-             StyledText {
-                 visible: root.timerDisplayActive
-                 text: root.getCountdownText(globalRemainingSeconds.value, false, true)
-                 font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
-                 font.weight: Font.Medium
-                 color: root.showSecondsOnly ? Theme.primary : Theme.surfaceVariantText
-                 opacity: root.showSecondsOnly ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
-                 anchors.verticalCenter: parent.verticalCenter
-             }
+              StyledText {
+                  visible: globalTimerDisplayActive.value
+                  text: root.getCountdownText(globalRemainingSeconds.value, false, true)
+                  font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
+                  font.weight: Font.Medium
+                  color: globalShowSecondsOnly.value ? Theme.primary : Theme.surfaceVariantText
+                  opacity: globalShowSecondsOnly.value ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
+                  anchors.verticalCenter: parent.verticalCenter
+              }
          }
      }
 
@@ -703,22 +787,22 @@ horizontalBarPill: Component {
          Column {
              spacing: Theme.spacingXS
 
-             DankIcon {
-                 name: root.timerDisplayActive ? root.getStateIcon() : "timer"
-                 size: Theme.barIconSize(root.barThickness)
-                 color: root.timerDisplayActive ? root.getStateColor() : Theme.widgetIconColor
-                 anchors.horizontalCenter: parent.horizontalCenter
-             }
+              DankIcon {
+                  name: globalTimerDisplayActive.value ? root.getStateIcon() : "timer"
+                  size: Theme.barIconSize(root.barThickness)
+                  color: globalTimerDisplayActive.value ? root.getStateColor() : Theme.widgetIconColor
+                  anchors.horizontalCenter: parent.horizontalCenter
+              }
 
-             StyledText {
-                 visible: root.timerDisplayActive
-                 text: root.getCountdownText(globalRemainingSeconds.value, true, true)
-                 font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
-                 font.weight: Font.Medium
-                 color: root.showSecondsOnly ? Theme.primary : Theme.surfaceVariantText
-                 opacity: root.showSecondsOnly ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
-                 anchors.horizontalCenter: parent.horizontalCenter
-             }
+              StyledText {
+                  visible: globalTimerDisplayActive.value
+                  text: root.getCountdownText(globalRemainingSeconds.value, true, true)
+                  font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
+                  font.weight: Font.Medium
+                  color: globalShowSecondsOnly.value ? Theme.primary : Theme.surfaceVariantText
+                  opacity: globalShowSecondsOnly.value ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
+                  anchors.horizontalCenter: parent.horizontalCenter
+              }
          }
      }
 

@@ -100,6 +100,19 @@ PluginSettings {
         }
     }
 
+    Connections {
+        target: PluginService
+        ignoreUnknownSignals: true
+        function onPluginStateChanged(changedPluginId) {
+            if (changedPluginId === "dmsKetchup")
+                root.refreshStats();
+        }
+        function onGlobalVarChanged(changedPluginId, varName) {
+            if (changedPluginId === "dmsKetchup" && varName === "completedPomodoros")
+                root.refreshStats();
+        }
+    }
+
     Component.onCompleted: root.refreshStats()
 
     StyledText {

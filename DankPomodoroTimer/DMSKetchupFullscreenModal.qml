@@ -112,10 +112,24 @@ Item {
                 anchors.rightMargin: { safeArea._refreshTrigger; return getOffset("right"); }
                 focus: true
 
-                Keys.onEscapePressed: (event) => {
-                    rootOverlay.onEscape();
-                    event.accepted = true;
-                }
+                    Keys.onEscapePressed: (event) => {
+                        rootOverlay.onEscape();
+                        event.accepted = true;
+                    }
+
+                    Keys.onReturnPressed: (event) => {
+                        if (rootOverlay.phase === "complete") {
+                            rootOverlay.onAction();
+                            event.accepted = true;
+                        }
+                    }
+
+                    Keys.onEnterPressed: (event) => {
+                        if (rootOverlay.phase === "complete") {
+                            rootOverlay.onAction();
+                            event.accepted = true;
+                        }
+                    }
 
                 Column {
                     anchors.centerIn: parent
@@ -185,6 +199,7 @@ Item {
                     anchors.bottomMargin: Theme.spacingXL
                     width: actionText.width + 40
                     height: actionText.height + 40
+                    visible: rootOverlay.phase !== "complete"
                     cursorShape: Qt.PointingHandCursor
                     hoverEnabled: true
 
@@ -199,6 +214,21 @@ Item {
                         opacity: parent.containsMouse ? 0.6 : 0.2
                         Behavior on opacity { NumberAnimation { duration: 150 } }
                     }
+                }
+
+                DankButton {
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottomMargin: Theme.spacingXL
+                    visible: rootOverlay.phase === "complete"
+                    buttonHeight: 56
+                    horizontalPadding: Theme.spacingXL * 2
+                    iconSize: 28
+                    iconName: "play_arrow"
+                    text: rootOverlay.actionLabel()
+                    backgroundColor: Theme.primary
+                    textColor: Theme.primaryText
+                    onClicked: rootOverlay.onAction()
                 }
             }
 
