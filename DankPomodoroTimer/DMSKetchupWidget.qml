@@ -90,9 +90,9 @@ PluginComponent {
             awayStartMs = 0;
             awaySnapshot = null;
             currentDateKey = formatDateKey(new Date());
-            let savedCounter = pluginService.loadPluginState("dmsKetchup", "cycleCounter", -1);
+            let savedCounter = pluginService.loadPluginState(statePluginId, "cycleCounter", -1);
             if (savedCounter === null || savedCounter === undefined || savedCounter < 0)
-                savedCounter = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + currentDateKey, 0) || 0;
+                savedCounter = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + currentDateKey, 0) || 0;
             globalCompletedPomodoros.set(savedCounter);
             loadLast7Days();
             closeBreakModal();
@@ -250,9 +250,9 @@ PluginComponent {
 
             let count = 0;
             if (dateKey === todayKey) {
-                count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + todayKey, 0) || 0;
+                count = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + todayKey, 0) || 0;
             } else {
-                count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey, 0) || 0;
+                count = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + dateKey, 0) || 0;
             }
 
             data.push({
@@ -345,6 +345,7 @@ PluginComponent {
     }
 
     property string instanceId: Math.random().toString(36).substring(2)
+    readonly property string statePluginId: "dmsKetchup"
 
         Timer {
             id: pomodoroTimer
@@ -379,9 +380,9 @@ PluginComponent {
             if (pluginService) {
                     const dateKey = formatDateKey(new Date());
                 const statKey = "completedPomodoros-" + dateKey;
-                const todayCount = (pluginService.loadPluginState("dmsKetchup", statKey, 0) || 0) + 1;
-                pluginService.savePluginState("dmsKetchup", statKey, todayCount);
-                pluginService.savePluginState("dmsKetchup", "cycleCounter", globalCompletedPomodoros.value);
+                const todayCount = (pluginService.loadPluginState(statePluginId, statKey, 0) || 0) + 1;
+                pluginService.savePluginState(statePluginId, statKey, todayCount);
+                pluginService.savePluginState(statePluginId, "cycleCounter", globalCompletedPomodoros.value);
                 loadLast7Days();
             }
             const isLongBreak = globalCompletedPomodoros.value % 4 === 0;
@@ -391,8 +392,10 @@ PluginComponent {
         }
     }
 
-    function startCycleBreak(isLongBreak) {
-        const notifTitle = root.tr("DMS Ketchup Complete", "DMS Ketchup completo");
+    function startCycleBreak(isLongBreak, interrupted) {
+        const notifTitle = interrupted
+            ? root.tr("DMS Ketchup", "DMS Ketchup")
+            : root.tr("DMS Ketchup Complete", "DMS Ketchup completo");
         const notifBody = root.tr("Time for a " + (isLongBreak ? "long" : "short") + " break!", "¡Es hora de un descanso " + (isLongBreak ? "largo" : "corto") + "!");
         if (!SessionData.doNotDisturb) {
             Quickshell.execDetached(["sh", "-c", "notify-send '" + notifTitle.replace(/'/g, "'\''") + "' '" + notifBody.replace(/'/g, "'\''") + "' -u normal"]);
@@ -480,12 +483,7 @@ PluginComponent {
     }
 
     function continueWorkingAfterBreak() {
-        const wasBreak = globalTimerState.value === "shortBreak" || globalTimerState.value === "longBreak";
         closeBreakModal();
-        if (wasBreak) {
-            root.startWork(true, true);
-            return;
-        }
         if (globalTimerState.value === "work")
             return;
         root.startWork(true, true);
@@ -549,11 +547,7 @@ PluginComponent {
         if (globalTimerState.value !== "work")
             return;
         globalIsRunning.set(false);
-        const isLongBreak = cycleBreakIsLong();
-        if (isLongBreak)
-            root.startLongBreak(true, true, true);
-        else
-            root.startShortBreak(true, true, true);
+        root.startCycleBreak(cycleBreakIsLong());
     }
 
     function beginAway(cause) {
@@ -614,7 +608,7 @@ PluginComponent {
                 root.startWork(true, true);
             } else if (awayMs >= shortBreakDuration * 60 * 1000) {
                 console.info("[dms-ketchup] applyAwayLogic", ">= short break: cycle break, session does not count");
-                root.startCycleBreak(cycleBreakIsLong());
+                root.startCycleBreak(cycleBreakIsLong(), true);
             } else {
                 console.info("[dms-ketchup] applyAwayLogic", "< short break: restore countdown");
                 globalTotalSeconds.set(snapshot.total);
@@ -654,12 +648,12 @@ PluginComponent {
         if (now < resetMoment)
             return;
         const todayKey = formatDateKey(now);
-        const lastReset = pluginService.loadPluginState("dmsKetchup", "cycleResetDate", "");
+        const lastReset = pluginService.loadPluginState(statePluginId, "cycleResetDate", "");
         if (lastReset === todayKey)
             return;
         globalCompletedPomodoros.set(0);
-        pluginService.savePluginState("dmsKetchup", "cycleCounter", 0);
-        pluginService.savePluginState("dmsKetchup", "cycleResetDate", todayKey);
+        pluginService.savePluginState(statePluginId, "cycleCounter", 0);
+        pluginService.savePluginState(statePluginId, "cycleResetDate", todayKey);
         console.info("[dms-ketchup] cycle counter reset at", root.cycleResetHour + ":00");
     }
 
@@ -676,7 +670,7 @@ PluginComponent {
     function resetPomodoroCycle() {
         globalCompletedPomodoros.set(0);
         if (pluginService) {
-            pluginService.savePluginState("dmsKetchup", "cycleCounter", 0);
+            pluginService.savePluginState(statePluginId, "cycleCounter", 0);
         }
     }
 
@@ -775,12 +769,6 @@ PluginComponent {
         closeBreakModal();
     }
 
-    function formatTime(seconds, isVertical = false) {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return isVertical ? mins + "\n" + (secs < 10 ? "0" : "") + secs : mins + ":" + (secs < 10 ? "0" : "") + secs;
-    }
-
     function getCountdownText(seconds, isVertical = false, barOnlyMinutes = false) {
         if (!globalIsRunning.value && seconds === 0) {
             const totalSecs = root.workDuration * 60;
@@ -821,10 +809,6 @@ PluginComponent {
         return "coffee";
     }
 
-    function hasActiveTimer() {
-        return globalTimerDisplayActive.value;
-    }
-
     IpcHandler {
         function resetTimer(): string {
             root.resetTimer();
@@ -854,19 +838,7 @@ PluginComponent {
         target: "pomodoroTimer"
     }
 
-    Timer {
-        id: initTimer
-        interval: 100
-        repeat: false
-        running: true
-        onTriggered: {
-            if (globalRemainingSeconds.value === 0 && globalTotalSeconds.value === 0) {
-                root.startWork(false, false);
-            }
-        }
-    }
-
-horizontalBarPill: Component {
+    horizontalBarPill: Component {
          Row {
              spacing: Theme.spacingXS
 

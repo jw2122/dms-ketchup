@@ -40,6 +40,7 @@
 - [x] Push notifications gated on `SessionData.doNotDisturb` (send-time check; sounds and in-app UI unaffected)
 - [x] Lock/suspend rework: work sessions pause and resume within `shortBreakDuration`; longer absences take the previous break type (session does not count) then restart the session; `>= longBreakDuration` keeps the cycle reset; breaks are not paused by lock and lose away time on suspend (expired breaks finish into the next work session); deferred break modal now opens on unlock
 - [x] All five away branches verified via simulated away times (30 s restore, 70 s cycle break, 100 s cycle reset, break −30 s continue, break −90 s finish) plus a real work completion (counter + stat persisted correctly)
+- [x] Code-review cleanup: removed dead code (`formatTime`, `hasActiveTimer`, redundant boot `initTimer`), simplified `continueWorkingAfterBreak`, `skipWork` now notifies + plays a sound via `startCycleBreak`, interrupted sessions get a neutral notification title, `statePluginId`/`pluginId` constant replaces ~20 inline `"dmsKetchup"` literals, removed the redundant 10 s stats poll in settings (event-driven refresh covers all writers)
 - [x] Break-complete: big "Continue working" `DankButton` (56 px, primary color, play icon) + Return/Enter key on the focused modal
 - [x] Settings statistics live refresh (event-driven via `pluginStateChanged` / `globalVarChanged`, 10 s poll kept as fallback)
 - [x] Removed dangling `initGuardTimer.restart()` calls (referenced but never defined — threw ReferenceError on every start)

@@ -39,7 +39,7 @@ PluginSettings {
             const date = new Date(today);
             date.setDate(today.getDate() - i);
             const dateKey = root.formatDateKey(date);
-            const count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey, 0) || 0;
+            const count = pluginService.loadPluginState(root.pluginId, "completedPomodoros-" + dateKey, 0) || 0;
             weekTotal += count;
             if (count > 0) {
                 contributors.push({ date: dateKey, count: count });
@@ -53,12 +53,12 @@ PluginSettings {
             const date = new Date(today);
             date.setDate(today.getDate() - d);
             const dateKey = root.formatDateKey(date);
-            const count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey, 0) || 0;
+            const count = pluginService.loadPluginState(root.pluginId, "completedPomodoros-" + dateKey, 0) || 0;
             total += count;
         }
 
         root.stats = {
-            today: pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + todayKey, 0) || 0,
+            today: pluginService.loadPluginState(root.pluginId, "completedPomodoros-" + todayKey, 0) || 0,
             week: weekTotal,
             total: total,
             contributors: contributors
@@ -73,20 +73,12 @@ PluginSettings {
             const date = new Date(today);
             date.setDate(today.getDate() - d);
             const dateKey = root.formatDateKey(date);
-            pluginService.removePluginStateKey("dmsKetchup", "completedPomodoros-" + dateKey);
+            pluginService.removePluginStateKey(root.pluginId, "completedPomodoros-" + dateKey);
         }
-        pluginService.removePluginStateKey("dmsKetchup", "cycleCounter");
-        pluginService.removePluginStateKey("dmsKetchup", "cycleResetDate");
-        PluginService.setGlobalVar("dmsKetchup", "completedPomodoros", 0);
+        pluginService.removePluginStateKey(root.pluginId, "cycleCounter");
+        pluginService.removePluginStateKey(root.pluginId, "cycleResetDate");
+        PluginService.setGlobalVar(root.pluginId, "completedPomodoros", 0);
         root.refreshStats();
-    }
-
-    Timer {
-        id: statsRefreshTimer
-        interval: 10000
-        running: true
-        repeat: true
-        onTriggered: root.refreshStats()
     }
 
     Timer {
