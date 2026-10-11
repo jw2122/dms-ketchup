@@ -75,6 +75,8 @@ PluginSettings {
             const dateKey = root.formatDateKey(date);
             pluginService.removePluginStateKey("dmsKetchup", "completedPomodoros-" + dateKey);
         }
+        pluginService.removePluginStateKey("dmsKetchup", "cycleCounter");
+        pluginService.removePluginStateKey("dmsKetchup", "cycleResetDate");
         PluginService.setGlobalVar("dmsKetchup", "completedPomodoros", 0);
         root.refreshStats();
     }
@@ -91,7 +93,7 @@ PluginSettings {
         id: statsInitTimer
         interval: 500
         repeat: true
-        running: pluginService === null
+        running: true
         onTriggered: {
             if (pluginService) {
                 running = false;
@@ -150,28 +152,40 @@ PluginSettings {
                 color: Theme.surfaceText
             }
 
-            StringSetting {
+            SliderSettingPlus {
                 settingKey: "workDuration"
-                label: root.tr("Work Duration (minutes)", "Duración de trabajo (minutos)")
+                label: root.tr("Work Duration", "Duración de trabajo")
                 description: root.tr("Length of each focus session", "Duración de cada sesión de enfoque")
-                placeholder: "25"
-                defaultValue: "25"
+                defaultValue: 25
+                minimum: 5
+                maximum: 60
+                unit: "m"
+                leftLabel: "5m"
+                rightLabel: "60m"
             }
 
-            StringSetting {
+            SliderSettingPlus {
                 settingKey: "shortBreakDuration"
-                label: root.tr("Short Break (minutes)", "Descanso corto (minutos)")
+                label: root.tr("Short Break", "Descanso corto")
                 description: root.tr("Break after each session", "Descanso después de cada sesión")
-                placeholder: "5"
-                defaultValue: "5"
+                defaultValue: 5
+                minimum: 1
+                maximum: 10
+                unit: "m"
+                leftLabel: "1m"
+                rightLabel: "10m"
             }
 
-            StringSetting {
+            SliderSettingPlus {
                 settingKey: "longBreakDuration"
-                label: root.tr("Long Break (minutes)", "Descanso largo (minutos)")
+                label: root.tr("Long Break", "Descanso largo")
                 description: root.tr("Break after 4 sessions", "Descanso después de 4 sesiones")
-                placeholder: "15"
-                defaultValue: "15"
+                defaultValue: 15
+                minimum: 1
+                maximum: 30
+                unit: "m"
+                leftLabel: "1m"
+                rightLabel: "30m"
             }
         }
     }
@@ -236,6 +250,17 @@ PluginSettings {
                 description: root.tr("Automatically enable Do Not Disturb mode during work sessions", "Activa automáticamente el modo No molestar durante las sesiones de trabajo")
                 defaultValue: false
             }
+
+            SliderSettingPlus {
+                settingKey: "cycleResetHour"
+                label: root.tr("Cycle reset time", "Hora de reinicio del ciclo")
+                description: root.tr("Time of day when the break-cycle counter resets. Daily statistics still reset at midnight.", "Hora del día en que se reinicia el contador de descansos. Las estadísticas diarias siguen reiniciándose a medianoche.")
+                defaultValue: 4
+                minimum: 0
+                maximum: 23
+                leftLabel: "0:00"
+                rightLabel: "23:00"
+            }
         }
     }
 
@@ -265,7 +290,7 @@ PluginSettings {
                 defaultValue: true
             }
 
-            SliderSetting {
+            SliderSettingPlus {
                 settingKey: "preWarningTime"
                 label: root.tr("Pre-warning lead time", "Antelación del aviso")
                 description: root.tr("Seconds before the break starts", "Segundos antes de que empiece el descanso")
@@ -273,6 +298,8 @@ PluginSettings {
                 minimum: 5
                 maximum: 60
                 unit: "s"
+                leftLabel: "5s"
+                rightLabel: "60s"
             }
 
             SelectionSetting {
