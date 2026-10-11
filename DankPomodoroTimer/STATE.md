@@ -4,7 +4,7 @@
 
 - Repo: `~/.config/DankMaterialShell/plugins/.repos/39b15ac4661f477a/` (branch `main`)
 - Remote: https://github.com/virtualwolf-369/dms-ketchup
-- Commits: `ebdecf3` (countdown/overlay/pre-warning), `bcf42ee` (statistics dashboard + dms-common), `5d9c474` (fix progress bar staying gray)
+- Commits: `ebdecf3` (countdown/overlay/pre-warning), `bcf42ee` (statistics dashboard + dms-common), `5d9c474` (fix progress bar staying gray), `45c02ff` (multi-screen countdown, away/lock handling, break-complete button, live stats), `7400424` (slider settings + cycle reset time option), `5cf228b` (cycle reset hour, DND-gated notifications, lock/suspend break flow)
 
 ## Environment
 
