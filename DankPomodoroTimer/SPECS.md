@@ -13,6 +13,7 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 | `DMSKetchupSettings.qml` | Settings page + statistics dashboard |
 | `DMSKetchupFullscreenModal.qml` | Break modal — one `PanelWindow` per screen (`Repeater { model: Quickshell.screens }`) |
 | `DMSKetchupPreWarningToast.qml` | Pre-warning toast (primary screen only) |
+| `translations/` | Motivational phrases, one `<lang>.json` per language (18 languages) |
 | `dms-common/` | Design-system components copied from takeABreak (SettingsCard, SectionTitle, InfoTile, DankButton, ...) |
 | `plugin.json` / `qmldir` | Plugin manifest / QML module |
 
@@ -35,6 +36,20 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 2. Short break (every 4th is a long break; long iff `completedPomodoros % 4 === 0` after the increment) -> fullscreen modal on all screens
 3. Manual continue (`requireManualContinueAfterBreak`) -> `startWork()`
 4. Pre-warning toast `preWarningTime` (default 10 s) before a session ends
+
+## Media pause
+
+- When a short or long break starts (natural completion, cycle break, quick action or skip), every Mpris player with `isPlaying && canPause` is paused via `MprisController.availablePlayers`
+- There is deliberately **no resume**: players stay paused until the user resumes them
+- Setting `pauseMediaDuringBreaks` (default on) disables the pause entirely
+
+## Motivational phrases
+
+- The 11 break tips shown in the fullscreen modal are loaded from `translations/<lang>.json` (I18n table format: `{ "tips": { "<english>": "<translation>" } }`)
+- 18 languages ship: en, de, es, fr, it, pt, nl, pl, ru, uk, bg, zh_CN, zh_TW, ja, ko, tr, hu, sv; anything else falls back to English
+- Setting `phraseLanguage` (default `system`): `system` resolves the system locale through a candidate chain (full locale → hyphen variant → language → en); an explicit language loads `translations/<lang>.json` with an en fallback
+- The chain is walked with `cat` via `Proc.runCommand`, because `FileView` does not report missing files reliably (it fires neither `onLoaded` nor `onLoadFailed` for a nonexistent path)
+- The modal picks a random phrase from the loaded table (re-picks when the table changes) and hides the tip line when nothing loaded
 
 ## Cycle reset hour
 
@@ -79,13 +94,15 @@ Return:
 | break (suspend) | remaining − away <= 0 | Break treated as finished -> break-complete flow (next work session) |
 
 - Screen unlock / resume consumes the deferred break modal (the old `deferredBreakModalPhase` was written but never read — fixed)
-- Detection: `SessionService` push signals (`preparingForSleep` → suspend; `sessionLocked` / `sessionUnlocked` / `sessionResumed`, driven by loginctl and on by default via `loginctlLockIntegration`) are the primary path. The 10 s `dms ipc call lock isLocked` probe runs only as a fallback when that integration is disabled, and only while a session is active (`timerDisplayActive`) — zero polling in the default configuration. Lid close while locked upgrades the cause to suspend.
+- Detection: `SessionService` push signals (`preparingForSleep` → suspend; `sessionLocked` / `sessionUnlocked` / `sessionResumed`, driven by loginctl and on by default via `loginctlLockIntegration`) are the primary path. The 30 s `dms ipc call lock isLocked` probe runs only as a fallback when that integration is disabled, and only while a session is active (`timerDisplayActive`) — zero polling in the default configuration. Lid close while locked upgrades the cause to suspend.
 
 ## Settings
 
 - Durations use `SliderSettingPlus` sliders (take-a-break style): Work 5–60 min (default 25), Short Break 1–10 min (default 5), Long Break 1–30 min (default 15); stored as integers, sanitized by `toDuration()` (old string values keep working until the slider is moved once)
 - Pre-warning lead time: slider 5–60 s
 - Cycle reset time: slider 0–23 h (default 4)
+- Pause media during breaks: toggle (default on) — Behavior card
+- Phrase language: selection, "System language" (default) + the 18 shipped languages — Phrases card
 
 ## Statistics dashboard (settings)
 

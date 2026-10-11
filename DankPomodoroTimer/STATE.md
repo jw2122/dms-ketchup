@@ -4,7 +4,7 @@
 
 - Repo: `~/.config/DankMaterialShell/plugins/.repos/39b15ac4661f477a/` (branch `main`)
 - Remote: https://github.com/virtualwolf-369/dms-ketchup
-- Commits: `ebdecf3` (countdown/overlay/pre-warning), `bcf42ee` (statistics dashboard + dms-common), `5d9c474` (fix progress bar staying gray), `45c02ff` (multi-screen countdown, away/lock handling, break-complete button, live stats), `7400424` (slider settings + cycle reset time option), `5cf228b` (cycle reset hour, DND-gated notifications, lock/suspend break flow), `b312036` (code-review cleanup), `c2a9909` (gate lock probe on loginctl signal path), `9c45568` (slow lock probe fallback to 10 s)
+- Commits: `ebdecf3` (countdown/overlay/pre-warning), `bcf42ee` (statistics dashboard + dms-common), `5d9c474` (fix progress bar staying gray), `45c02ff` (multi-screen countdown, away/lock handling, break-complete button, live stats), `7400424` (slider settings + cycle reset time option), `5cf228b` (cycle reset hour, DND-gated notifications, lock/suspend break flow), `b312036` (code-review cleanup), `c2a9909` (gate lock probe on loginctl signal path), `9c45568` (slow lock probe fallback to 10 s), `18fa5e9` (pause all media players when a break starts), `69c5fc2` (slow lock probe fallback to 30 s), `653bb45` (motivational phrase translations with selectable language)
 
 ## Environment
 
@@ -45,10 +45,12 @@
 - [x] Break-complete: big "Continue working" `DankButton` (56 px, primary color, play icon) + Return/Enter key on the focused modal
 - [x] Settings statistics live refresh (event-driven via `pluginStateChanged` / `globalVarChanged`; the 10 s poll was removed — events cover every writer)
 - [x] Removed dangling `initGuardTimer.restart()` calls (referenced but never defined — threw ReferenceError on every start)
+- [x] Media pause: every playing Mpris player (`isPlaying && canPause`) is paused when a short/long break starts (covers completion, cycle breaks, quick actions, skip); deliberately no resume; `pauseMediaDuringBreaks` toggle (default on) in the Behavior card — verified live ("paused 1 media player(s)")
+- [x] Phrase translations: 11 tips in 18 languages under `translations/<lang>.json`; `phraseLanguage` setting (default `system`, candidate chain full locale → hyphen variant → language → en); modal picks a random phrase and hides the line when empty; verified system fallback (de_AT → de.json) and explicit selection (ja.json)
 
 ## Known limitations / to verify later
 
-- Away detection (SessionService signals; gated 10 s `lock isLocked` probe fallback) is wired but not yet exercised against a real screen lock — the lock screen was unstable during testing; verify manually by locking during a work session, ideally once with `loginctlLockIntegration` disabled to exercise the probe fallback
+- Away detection (SessionService signals; gated 30 s `lock isLocked` probe fallback) is wired but not yet exercised against a real screen lock — the lock screen was unstable during testing; verify manually by locking during a work session, ideally once with `loginctlLockIntegration` disabled to exercise the probe fallback
 - The pre-warning toast still shows only on the primary screen (by design)
 - DND gating verified by inspection (live `SessionData.doNotDisturb` property read at send time); toggle DND during a session to observe it end-to-end
 - Old string duration values (e.g. `"1,5"`) still drive the timer, but the sliders show a coerced value until moved once
