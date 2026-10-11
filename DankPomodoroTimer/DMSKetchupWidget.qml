@@ -41,6 +41,7 @@ PluginComponent {
     property bool enablePreWarning: pluginData.enablePreWarning ?? true
     property int preWarningTime: pluginData.preWarningTime ?? 10
     property int cycleResetHour: toIntSetting(pluginData.cycleResetHour, 4, 0, 23)
+    property bool pauseMediaDuringBreaks: pluginData.pauseMediaDuringBreaks ?? true
     property real preWarningOpacity: (pluginData.preWarningOpacity ?? 100) / 100
     property bool isPreWarning: false
     property var preWarningWindow: null
@@ -693,8 +694,27 @@ PluginComponent {
         closeBreakModal();
     }
 
+    function pauseMediaPlayers() {
+        if (!root.pauseMediaDuringBreaks)
+            return;
+        let paused = 0;
+        const players = (typeof MprisController !== "undefined" && MprisController) ? (MprisController.availablePlayers || []) : [];
+        for (let i = 0; i < players.length; i++) {
+            const player = players[i];
+            if (player && player.isPlaying && player.canPause) {
+                player.pause();
+                paused++;
+            }
+        }
+        if (paused > 0)
+            console.info("[dms-ketchup] paused", paused, "media player(s) for the break");
+        else
+            console.info("[dms-ketchup] pauseMediaPlayers: no playing players (setting=", root.pauseMediaDuringBreaks, ")");
+    }
+
     function startShortBreak(autoStart, openModal = false, playSoundNow = true) {
         root.closePreWarning();
+        root.pauseMediaPlayers();
         console.log("[pomodoro-debug] startShortBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
         if (root.autoSetDND) {
             SessionData.setDoNotDisturb(false);
@@ -720,6 +740,7 @@ PluginComponent {
 
     function startLongBreak(autoStart, openModal = false, playSoundNow = true) {
         root.closePreWarning();
+        root.pauseMediaPlayers();
         console.log("[pomodoro-debug] startLongBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
         if (root.autoSetDND) {
             SessionData.setDoNotDisturb(false);

@@ -243,6 +243,13 @@ PluginSettings {
                 defaultValue: false
             }
 
+            ToggleSetting {
+                settingKey: "pauseMediaDuringBreaks"
+                label: root.tr("Pause media during breaks", "Medien während Pausen pausieren")
+                description: root.tr("Pause all playing media players when a break starts; they stay paused until you resume them yourself", "Pausiert alle laufenden Medien, wenn eine Pause beginnt; sie bleiben pausiert, bis du sie selbst fortsetzt")
+                defaultValue: true
+            }
+
             SliderSettingPlus {
                 settingKey: "cycleResetHour"
                 label: root.tr("Cycle reset time", "Hora de reinicio del ciclo")
