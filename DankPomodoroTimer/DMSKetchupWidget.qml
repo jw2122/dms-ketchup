@@ -164,7 +164,7 @@ PluginComponent {
         id: lockStateProbeTimer
         interval: 1000
         repeat: true
-        running: true
+        running: globalTimerDisplayActive.value && !SettingsData.loginctlLockIntegration
         onTriggered: {
             if (!root.lockProbeBusy) {
                 root.lockProbeBusy = true;

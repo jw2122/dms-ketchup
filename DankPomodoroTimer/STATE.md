@@ -39,15 +39,16 @@
 - [x] Cycle reset hour: counter decoupled from daily stats (`cycleCounter` / `cycleResetDate` keys; daily stats incremented per completion; midnight rollover no longer resets the counter; away-reset no longer wipes today's stats; `skipWork` uses the cycle-consistent break type)
 - [x] Push notifications gated on `SessionData.doNotDisturb` (send-time check; sounds and in-app UI unaffected)
 - [x] Lock/suspend rework: work sessions pause and resume within `shortBreakDuration`; longer absences take the previous break type (session does not count) then restart the session; `>= longBreakDuration` keeps the cycle reset; breaks are not paused by lock and lose away time on suspend (expired breaks finish into the next work session); deferred break modal now opens on unlock
+- [x] Lock detection optimized: `SessionService` push signals are the primary path (loginctl integration is on by default); the 1 s `lock isLocked` probe now only runs as a fallback when that integration is disabled and only while a session is active — zero process spawns in the default configuration (was ~86k/day)
 - [x] All five away branches verified via simulated away times (30 s restore, 70 s cycle break, 100 s cycle reset, break −30 s continue, break −90 s finish) plus a real work completion (counter + stat persisted correctly)
 - [x] Code-review cleanup: removed dead code (`formatTime`, `hasActiveTimer`, redundant boot `initTimer`), simplified `continueWorkingAfterBreak`, `skipWork` now notifies + plays a sound via `startCycleBreak`, interrupted sessions get a neutral notification title, `statePluginId`/`pluginId` constant replaces ~20 inline `"dmsKetchup"` literals, removed the redundant 10 s stats poll in settings (event-driven refresh covers all writers)
 - [x] Break-complete: big "Continue working" `DankButton` (56 px, primary color, play icon) + Return/Enter key on the focused modal
-- [x] Settings statistics live refresh (event-driven via `pluginStateChanged` / `globalVarChanged`, 10 s poll kept as fallback)
+- [x] Settings statistics live refresh (event-driven via `pluginStateChanged` / `globalVarChanged`; the 10 s poll was removed — events cover every writer)
 - [x] Removed dangling `initGuardTimer.restart()` calls (referenced but never defined — threw ReferenceError on every start)
 
 ## Known limitations / to verify later
 
-- Away detection triggers (SessionService signals + 1 s `dms ipc call lock isLocked` probe) are wired but not yet exercised against a real screen lock — the lock screen was unstable during testing; verify manually by locking during a work session
+- Away detection (SessionService signals; gated `lock isLocked` probe fallback) is wired but not yet exercised against a real screen lock — the lock screen was unstable during testing; verify manually by locking during a work session, ideally once with `loginctlLockIntegration` disabled to exercise the probe fallback
 - The pre-warning toast still shows only on the primary screen (by design)
 - DND gating verified by inspection (live `SessionData.doNotDisturb` property read at send time); toggle DND during a session to observe it end-to-end
 - Old string duration values (e.g. `"1,5"`) still drive the timer, but the sliders show a coerced value until moved once
