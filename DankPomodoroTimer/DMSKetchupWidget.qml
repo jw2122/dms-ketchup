@@ -163,7 +163,9 @@ PluginComponent {
 
     Timer {
         id: lockStateProbeTimer
-        interval: 10000
+        // Safety net only (SessionService signals are the primary path) —
+        // 30 s is plenty and cuts the IPC spawns 3x.
+        interval: 30000
         repeat: true
         running: globalTimerDisplayActive.value && !SettingsData.loginctlLockIntegration
         onTriggered: {
