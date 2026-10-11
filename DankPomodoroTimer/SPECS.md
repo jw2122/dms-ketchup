@@ -31,10 +31,23 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 ## Session flow
 
-1. Work session completes -> `completedPomodoros` +1 -> saved under `completedPomodoros-YYYY-MM-DD` -> notification + sound
-2. Short break (every 4th is a long break) -> fullscreen modal on all screens
+1. Work session completes -> `completedPomodoros` +1 -> `cycleCounter` saved **and** `completedPomodoros-YYYY-MM-DD` incremented by 1 -> notification (only when DND is off) + sound
+2. Short break (every 4th is a long break; long iff `completedPomodoros % 4 === 0` after the increment) -> fullscreen modal on all screens
 3. Manual continue (`requireManualContinueAfterBreak`) -> `startWork()`
 4. Pre-warning toast `preWarningTime` (default 10 s) before a session ends
+
+## Cycle reset hour
+
+- Setting `cycleResetHour` (slider 0–23, default 4): time of day when the break-cycle counter resets
+- The counter persists under the `cycleCounter` state key (loaded at startup; migrated from `completedPomodoros-<today>` on first run)
+- A 60 s check (plus the startup path) resets the counter once per day once the hour has passed; tracked by the `cycleResetDate` state key, so a shell started after the hour also resets
+- Daily statistics still reset at midnight: sessions completed between midnight and the reset hour count toward the new calendar day but continue the previous day's cycle
+
+## Notifications
+
+- Push notifications (`notify-send`) are only sent when `SessionData.doNotDisturb` is off — checked at send time, so manually enabled, scheduled (`doNotDisturbUntil`), or app-set DND suppresses them
+- With `autoSetDND` on, the shell's own DND is cleared at session end (before the check), so the break notification still fires
+- Sounds and in-app UI (pre-warning toast, fullscreen modal) are unaffected
 
 ## IPC
 
@@ -42,18 +55,37 @@ Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBre
 
 ## Persistence
 
-- Daily stats: `completedPomodoros-YYYY-MM-DD` keys in `~/.local/state/DankMaterialShell/plugins/dmsKetchup_state.json` (single JSON file; cache updated immediately, disk write debounced 150 ms)
-- The `completedPomodoros` global var is the live mirror: loaded at startup and on day rollover (60 s check)
+- Daily stats: `completedPomodoros-YYYY-MM-DD` keys — incremented by 1 on each completion (true daily counts; keys roll over at midnight)
+- Cycle counter: `cycleCounter` (break-cycle position) and `cycleResetDate` (last daily reset) keys
+- All in `~/.local/state/DankMaterialShell/plugins/dmsKetchup_state.json` (single JSON file; cache updated immediately, disk write debounced 150 ms)
+- The `completedPomodoros` global var is the live cycle counter; the 7-day chart reads every day from disk
 
-## Away / lock / suspend behavior (work sessions only — running or paused)
+## Away / lock / suspend behavior
 
-| Time away | On return |
-| --- | --- |
-| < 5 min (`shortBreakDuration`) | Countdown resumes where it left off |
-| 5–15 min | Fresh work session, auto-starts; daily counter unchanged |
-| >= 15 min (incl. 8 h+) | Daily counter reset to 0 + fresh work session, auto-starts |
+Departure (screen lock or lid close):
 
-Detection: `SessionService` (`preparingForSleep`, `sessionLocked` / `sessionUnlocked` / `sessionResumed`) plus the 1 s `dms ipc call lock isLocked` probe as fallback.
+- **Work session**: timer pauses, state snapshotted
+- **Break + screen lock**: nothing — breaks keep running while the machine stays on; a break completing while locked defers its modal to unlock
+- **Break + suspend**: the break's remaining time is snapshotted — breaks are not paused, the away time counts against them
+
+Return:
+
+| Phase | Time away | On return |
+| --- | --- | --- |
+| work | < `shortBreakDuration` | Countdown resumes where it left off |
+| work | `shortBreakDuration` – `longBreakDuration` | Interrupted session does **not** count; the previous break type repeats (`counter > 0 && counter % 4 === 0` → long, else short), then a fresh work session starts ("session N again") |
+| work | >= `longBreakDuration` | Cycle counter reset to 0 + fresh work session |
+| break (suspend) | remaining − away > 0 | Break continues with the reduced remaining time |
+| break (suspend) | remaining − away <= 0 | Break treated as finished -> break-complete flow (next work session) |
+
+- Screen unlock / resume consumes the deferred break modal (the old `deferredBreakModalPhase` was written but never read — fixed)
+- Detection: `SessionService` (`preparingForSleep` → suspend, `sessionLocked` / `sessionUnlocked` / `sessionResumed`) plus the 1 s `dms ipc call lock isLocked` probe as fallback; lid close while locked upgrades the cause to suspend
+
+## Settings
+
+- Durations use `SliderSettingPlus` sliders (take-a-break style): Work 5–60 min (default 25), Short Break 1–10 min (default 5), Long Break 1–30 min (default 15); stored as integers, sanitized by `toDuration()` (old string values keep working until the slider is moved once)
+- Pre-warning lead time: slider 5–60 s
+- Cycle reset time: slider 0–23 h (default 4)
 
 ## Statistics dashboard (settings)
 

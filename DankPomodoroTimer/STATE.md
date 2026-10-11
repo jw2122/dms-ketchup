@@ -35,10 +35,11 @@
 - [x] Statistics dashboard + Reset Stats
 - [x] Direct-binding progress bar in the break modal
 - [x] Multi-screen bar-pill fix (`timerDisplayActive` / `showSecondsOnly` → PluginGlobalVar; wall-clock blink)
-- [x] Away / lock / suspend handling (see SPECS.md matrix) — branch logic verified via simulated away times:
-  - < short break: countdown restored and resumed
-  - >= short break, < long break: fresh auto-starting session, counter unchanged
-  - >= long break (incl. 8 h): counter reset to 0 (persisted) + fresh auto-starting session
+- [x] Settings UI: duration sliders (Work 5–60, Short 1–10, Long 1–30 — take-a-break limits), cycle reset time slider (0–23, default 4), pre-warning lead-time slider; stats now load initially without pressing Refresh (`statsInitTimer` polling fix)
+- [x] Cycle reset hour: counter decoupled from daily stats (`cycleCounter` / `cycleResetDate` keys; daily stats incremented per completion; midnight rollover no longer resets the counter; away-reset no longer wipes today's stats; `skipWork` uses the cycle-consistent break type)
+- [x] Push notifications gated on `SessionData.doNotDisturb` (send-time check; sounds and in-app UI unaffected)
+- [x] Lock/suspend rework: work sessions pause and resume within `shortBreakDuration`; longer absences take the previous break type (session does not count) then restart the session; `>= longBreakDuration` keeps the cycle reset; breaks are not paused by lock and lose away time on suspend (expired breaks finish into the next work session); deferred break modal now opens on unlock
+- [x] All five away branches verified via simulated away times (30 s restore, 70 s cycle break, 100 s cycle reset, break −30 s continue, break −90 s finish) plus a real work completion (counter + stat persisted correctly)
 - [x] Break-complete: big "Continue working" `DankButton` (56 px, primary color, play icon) + Return/Enter key on the focused modal
 - [x] Settings statistics live refresh (event-driven via `pluginStateChanged` / `globalVarChanged`, 10 s poll kept as fallback)
 - [x] Removed dangling `initGuardTimer.restart()` calls (referenced but never defined — threw ReferenceError on every start)
@@ -47,3 +48,5 @@
 
 - Away detection triggers (SessionService signals + 1 s `dms ipc call lock isLocked` probe) are wired but not yet exercised against a real screen lock — the lock screen was unstable during testing; verify manually by locking during a work session
 - The pre-warning toast still shows only on the primary screen (by design)
+- DND gating verified by inspection (live `SessionData.doNotDisturb` property read at send time); toggle DND during a session to observe it end-to-end
+- Old string duration values (e.g. `"1,5"`) still drive the timer, but the sliders show a coerced value until moved once

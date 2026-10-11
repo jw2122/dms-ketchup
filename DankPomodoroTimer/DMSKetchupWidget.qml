@@ -20,6 +20,13 @@ PluginComponent {
         return isNaN(parsed) || parsed < 0 ? fallback : parsed;
     }
 
+    function toIntSetting(value, fallback, minValue, maxValue) {
+        const raw = (typeof value === "number") ? value : parseFloat(String(value).replace(",", "."));
+        if (isNaN(raw))
+            return fallback;
+        return Math.max(minValue, Math.min(maxValue, Math.round(raw)));
+    }
+
     property real workDuration: toDuration(pluginData.workDuration, 25)
     property real shortBreakDuration: toDuration(pluginData.shortBreakDuration, 5)
     property real longBreakDuration: toDuration(pluginData.longBreakDuration, 15)
@@ -33,6 +40,7 @@ PluginComponent {
     property bool soundsEnabled: pluginData.soundsEnabled ?? true
     property bool enablePreWarning: pluginData.enablePreWarning ?? true
     property int preWarningTime: pluginData.preWarningTime ?? 10
+    property int cycleResetHour: toIntSetting(pluginData.cycleResetHour, 4, 0, 23)
     property real preWarningOpacity: (pluginData.preWarningOpacity ?? 100) / 100
     property bool isPreWarning: false
     property var preWarningWindow: null
@@ -68,6 +76,7 @@ PluginComponent {
     property bool awayActive: false
     property int awayStartMs: 0
     property var awaySnapshot: null
+    property string awayCause: "lock"
 
     onPluginServiceChanged: {
         if (pluginService) {
@@ -77,8 +86,14 @@ PluginComponent {
             breakModalArmed = false;
             bootModalSuppressUntil = Date.now() + 20000;
             deferredBreakModalPhase = "";
+            awayActive = false;
+            awayStartMs = 0;
+            awaySnapshot = null;
             currentDateKey = formatDateKey(new Date());
-            globalCompletedPomodoros.set(pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + currentDateKey));
+            let savedCounter = pluginService.loadPluginState("dmsKetchup", "cycleCounter", -1);
+            if (savedCounter === null || savedCounter === undefined || savedCounter < 0)
+                savedCounter = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + currentDateKey, 0) || 0;
+            globalCompletedPomodoros.set(savedCounter);
             loadLast7Days();
             closeBreakModal();
             root.closePreWarning();
@@ -90,6 +105,7 @@ PluginComponent {
             globalTimerOwnerId.set(root.instanceId);
             globalIsRunning.set(false);
             lockStateProbeTimer.restart();
+            checkCycleReset();
         }
     }
 
@@ -129,11 +145,13 @@ PluginComponent {
                 const changed = locked !== root.sessionLocked;
                 root.sessionLocked = locked;
                 if (locked) {
-                    if (root.breakModalOpen)
+                    if (root.breakModalOpen) {
                         root.closeBreakModal();
-                    beginAway();
+                        root.deferredBreakModalPhase = "running";
+                    }
+                    beginAway("lock");
                 } else if (changed) {
-                    endAway();
+                    handleUnlocked();
                 }
             }
         }
@@ -160,17 +178,21 @@ PluginComponent {
         ignoreUnknownSignals: true
         function onPreparingForSleepChanged() {
             if (SessionService.preparingForSleep)
-                beginAway();
+                beginAway("suspend");
         }
         function onSessionLocked() {
-            beginAway();
+            if (root.breakModalOpen) {
+                root.closeBreakModal();
+                root.deferredBreakModalPhase = "running";
+            }
+            beginAway("lock");
         }
         function onSessionUnlocked() {
-            endAway();
+            handleUnlocked();
         }
         function onSessionResumed() {
             if (!SessionService.locked && !SettingsData.lockBeforeSuspend)
-                endAway();
+                handleUnlocked();
         }
     }
 
@@ -200,11 +222,10 @@ PluginComponent {
             const newDateKey = formatDateKey(new Date());
             if (newDateKey !== root.currentDateKey) {
                 root.currentDateKey = newDateKey;
-                if (pluginService) {
-                        globalCompletedPomodoros.set(pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + newDateKey));
+                if (pluginService)
                     loadLast7Days();
-                }
             }
+            checkCycleReset();
         }
     }
 
@@ -229,9 +250,9 @@ PluginComponent {
 
             let count = 0;
             if (dateKey === todayKey) {
-                count = globalCompletedPomodoros.value;
+                count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + todayKey, 0) || 0;
             } else {
-                count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey);
+                count = pluginService.loadPluginState("dmsKetchup", "completedPomodoros-" + dateKey, 0) || 0;
             }
 
             data.push({
@@ -357,53 +378,67 @@ PluginComponent {
             globalCompletedPomodoros.set(globalCompletedPomodoros.value + 1);
             if (pluginService) {
                     const dateKey = formatDateKey(new Date());
-                pluginService.savePluginState("dmsKetchup", "completedPomodoros-" + dateKey, globalCompletedPomodoros.value);
+                const statKey = "completedPomodoros-" + dateKey;
+                const todayCount = (pluginService.loadPluginState("dmsKetchup", statKey, 0) || 0) + 1;
+                pluginService.savePluginState("dmsKetchup", statKey, todayCount);
+                pluginService.savePluginState("dmsKetchup", "cycleCounter", globalCompletedPomodoros.value);
                 loadLast7Days();
             }
             const isLongBreak = globalCompletedPomodoros.value % 4 === 0;
+            root.startCycleBreak(isLongBreak);
+        } else {
+            root.finishBreak();
+        }
+    }
 
-            const notifTitle = root.tr("DMS Ketchup Complete", "DMS Ketchup completo");
-            const notifBody = root.tr("Time for a " + (isLongBreak ? "long" : "short") + " break!", "¡Es hora de un descanso " + (isLongBreak ? "largo" : "corto") + "!");
+    function startCycleBreak(isLongBreak) {
+        const notifTitle = root.tr("DMS Ketchup Complete", "DMS Ketchup completo");
+        const notifBody = root.tr("Time for a " + (isLongBreak ? "long" : "short") + " break!", "¡Es hora de un descanso " + (isLongBreak ? "largo" : "corto") + "!");
+        if (!SessionData.doNotDisturb) {
             Quickshell.execDetached(["sh", "-c", "notify-send '" + notifTitle.replace(/'/g, "'\''") + "' '" + notifBody.replace(/'/g, "'\''") + "' -u normal"]);
-            root.playTimerSound("end");
+        }
+        root.playTimerSound("end");
 
-            if (root.autoSetDND) {
-                SessionData.setDoNotDisturb(false);
-            }
-            if (root.fullscreenBreakModalEnabled) {
-                root.breakModalArmed = true;
-                if (isLongBreak) {
-                    root.startLongBreak(true, false, true);
-                } else {
-                    root.startShortBreak(true, false, true);
-                }
-                if (root.sessionLocked || root.startupGuard) {
-                    root.deferredBreakModalPhase = "running";
-                } else {
-                    root.openBreakModal("running");
-                }
+        if (root.autoSetDND) {
+            SessionData.setDoNotDisturb(false);
+        }
+        if (root.fullscreenBreakModalEnabled) {
+            root.breakModalArmed = true;
+            if (isLongBreak) {
+                root.startLongBreak(true, false, true);
             } else {
-                root.breakModalArmed = true;
-                if (isLongBreak) {
-                    root.startLongBreak(root.autoStartBreaks, false, true);
-                } else {
-                    root.startShortBreak(root.autoStartBreaks, false, true);
-                }
+                root.startShortBreak(true, false, true);
+            }
+            if (root.sessionLocked || root.startupGuard) {
+                root.deferredBreakModalPhase = "running";
+            } else {
+                root.openBreakModal("running");
             }
         } else {
-            Quickshell.execDetached(["sh", "-c", "notify-send '" + root.tr("Break Complete", "Descanso completo").replace(/'/g, "'\''") + "' '" + root.tr("Ready for another pomodoro?", "¿Listo para otro ciclo?").replace(/'/g, "'\''") + "' -u normal"]);
-            root.playTimerSound("end");
-            if (root.fullscreenBreakModalEnabled && root.requireManualContinueAfterBreak) {
-                breakModalPhase = "complete";
-                if (root.sessionLocked || root.startupGuard) {
-                    root.deferredBreakModalPhase = "complete";
-                } else {
-                    breakModalOpen = true;
-                }
+            root.breakModalArmed = true;
+            if (isLongBreak) {
+                root.startLongBreak(root.autoStartBreaks, false, true);
             } else {
-                root.breakModalArmed = false;
-                root.startWork(root.autoStartPomodoros, true);
+                root.startShortBreak(root.autoStartBreaks, false, true);
             }
+        }
+    }
+
+    function finishBreak() {
+        if (!SessionData.doNotDisturb) {
+            Quickshell.execDetached(["sh", "-c", "notify-send '" + root.tr("Break Complete", "Descanso completo").replace(/'/g, "'\''") + "' '" + root.tr("Ready for another pomodoro?", "¿Listo para otro ciclo?").replace(/'/g, "'\''") + "' -u normal"]);
+        }
+        root.playTimerSound("end");
+        if (root.fullscreenBreakModalEnabled && root.requireManualContinueAfterBreak) {
+            breakModalPhase = "complete";
+            if (root.sessionLocked || root.startupGuard) {
+                root.deferredBreakModalPhase = "complete";
+            } else {
+                breakModalOpen = true;
+            }
+        } else {
+            root.breakModalArmed = false;
+            root.startWork(root.autoStartPomodoros, true);
         }
     }
 
@@ -514,26 +549,47 @@ PluginComponent {
         if (globalTimerState.value !== "work")
             return;
         globalIsRunning.set(false);
-        const isLongBreak = globalCompletedPomodoros.value % 4 === 0;
+        const isLongBreak = cycleBreakIsLong();
         if (isLongBreak)
             root.startLongBreak(true, true, true);
         else
             root.startShortBreak(true, true, true);
     }
 
-    function beginAway() {
-        if (awayActive || globalTimerState.value !== "work")
+    function beginAway(cause) {
+        if (awayActive) {
+            if (cause === "suspend")
+                awayCause = "suspend";
             return;
-        awaySnapshot = {
-            remaining: globalRemainingSeconds.value,
-            total: globalTotalSeconds.value,
-            wasRunning: globalIsRunning.value
-        };
-        awayActive = true;
-        awayStartMs = Date.now();
-        globalIsRunning.set(false);
-        root.closePreWarning();
-        console.info("[dms-ketchup] beginAway", "remaining=", awaySnapshot.remaining, "total=", awaySnapshot.total, "wasRunning=", awaySnapshot.wasRunning);
+        }
+        const state = globalTimerState.value;
+        if (state === "work") {
+            awaySnapshot = {
+                kind: "work",
+                remaining: globalRemainingSeconds.value,
+                total: globalTotalSeconds.value,
+                wasRunning: globalIsRunning.value
+            };
+            awayActive = true;
+            awayStartMs = Date.now();
+            awayCause = cause;
+            globalIsRunning.set(false);
+            root.closePreWarning();
+            console.info("[dms-ketchup] beginAway", "cause=", cause, "remaining=", awaySnapshot.remaining, "total=", awaySnapshot.total, "wasRunning=", awaySnapshot.wasRunning);
+        } else if ((state === "shortBreak" || state === "longBreak") && cause === "suspend") {
+            awaySnapshot = {
+                kind: "break",
+                remaining: globalRemainingSeconds.value,
+                total: globalTotalSeconds.value,
+                wasRunning: globalIsRunning.value
+            };
+            awayActive = true;
+            awayStartMs = Date.now();
+            awayCause = cause;
+            globalIsRunning.set(false);
+            root.closePreWarning();
+            console.info("[dms-ketchup] beginAway", "cause=", cause, "break=", state, "remaining=", awaySnapshot.remaining);
+        }
     }
 
     function endAway() {
@@ -544,33 +600,83 @@ PluginComponent {
         awayActive = false;
         awayStartMs = 0;
         awaySnapshot = null;
-        console.info("[dms-ketchup] endAway", "awayMs=", awayMs);
+        console.info("[dms-ketchup] endAway", "awayMs=", awayMs, "cause=", awayCause);
         applyAwayLogic(awayMs, snapshot);
     }
 
     function applyAwayLogic(awayMs, snapshot) {
-        if (awayMs >= longBreakDuration * 60 * 1000) {
-            console.info("[dms-ketchup] applyAwayLogic", ">= long break: reset cycle + fresh session");
-            resetPomodoroCycle();
-            root.startWork(true, true);
-        } else if (awayMs >= shortBreakDuration * 60 * 1000) {
-            console.info("[dms-ketchup] applyAwayLogic", ">= short break: fresh session");
-            root.startWork(true, true);
-        } else if (snapshot) {
-            console.info("[dms-ketchup] applyAwayLogic", "< short break: restore countdown");
-            globalTotalSeconds.set(snapshot.total);
-            globalRemainingSeconds.set(snapshot.remaining);
-            if (snapshot.wasRunning)
-                globalTimerOwnerId.set(root.instanceId);
-            globalIsRunning.set(snapshot.wasRunning);
+        if (!snapshot)
+            return;
+        if (snapshot.kind === "work") {
+            if (awayMs >= longBreakDuration * 60 * 1000) {
+                console.info("[dms-ketchup] applyAwayLogic", ">= long break: reset cycle + fresh session");
+                resetPomodoroCycle();
+                root.startWork(true, true);
+            } else if (awayMs >= shortBreakDuration * 60 * 1000) {
+                console.info("[dms-ketchup] applyAwayLogic", ">= short break: cycle break, session does not count");
+                root.startCycleBreak(cycleBreakIsLong());
+            } else {
+                console.info("[dms-ketchup] applyAwayLogic", "< short break: restore countdown");
+                globalTotalSeconds.set(snapshot.total);
+                globalRemainingSeconds.set(snapshot.remaining);
+                if (snapshot.wasRunning)
+                    globalTimerOwnerId.set(root.instanceId);
+                globalIsRunning.set(snapshot.wasRunning);
+            }
+        } else if (snapshot.kind === "break") {
+            const awaySecs = Math.floor(awayMs / 1000);
+            const remaining = snapshot.remaining - awaySecs;
+            if (remaining <= 0) {
+                console.info("[dms-ketchup] applyAwayLogic", "break expired during away: finish break");
+                root.finishBreak();
+            } else {
+                console.info("[dms-ketchup] applyAwayLogic", "continue break, remaining=", remaining);
+                globalTotalSeconds.set(snapshot.total);
+                globalRemainingSeconds.set(remaining);
+                globalShowSecondsOnly.set(remaining < 60);
+                if (snapshot.wasRunning)
+                    globalTimerOwnerId.set(root.instanceId);
+                globalIsRunning.set(snapshot.wasRunning);
+            }
+        }
+    }
+
+    function cycleBreakIsLong() {
+        return globalCompletedPomodoros.value > 0 && globalCompletedPomodoros.value % 4 === 0;
+    }
+
+    function checkCycleReset() {
+        if (!pluginService)
+            return;
+        const now = new Date();
+        const resetMoment = new Date(now);
+        resetMoment.setHours(root.cycleResetHour, 0, 0, 0);
+        if (now < resetMoment)
+            return;
+        const todayKey = formatDateKey(now);
+        const lastReset = pluginService.loadPluginState("dmsKetchup", "cycleResetDate", "");
+        if (lastReset === todayKey)
+            return;
+        globalCompletedPomodoros.set(0);
+        pluginService.savePluginState("dmsKetchup", "cycleCounter", 0);
+        pluginService.savePluginState("dmsKetchup", "cycleResetDate", todayKey);
+        console.info("[dms-ketchup] cycle counter reset at", root.cycleResetHour + ":00");
+    }
+
+    function handleUnlocked() {
+        sessionLocked = false;
+        endAway();
+        if (root.deferredBreakModalPhase !== "") {
+            const phase = root.deferredBreakModalPhase;
+            root.deferredBreakModalPhase = "";
+            openBreakModal(phase);
         }
     }
 
     function resetPomodoroCycle() {
         globalCompletedPomodoros.set(0);
         if (pluginService) {
-            pluginService.savePluginState("dmsKetchup", "completedPomodoros-" + formatDateKey(new Date()), 0);
-            loadLast7Days();
+            pluginService.savePluginState("dmsKetchup", "cycleCounter", 0);
         }
     }
 
