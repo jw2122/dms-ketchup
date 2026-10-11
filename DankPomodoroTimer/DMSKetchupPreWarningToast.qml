@@ -149,7 +149,7 @@ PanelWindow {
                     color: Theme.primary
                 }
                 StyledText {
-                    text: I18n.tr("DMS Ketchup")
+                    text: pluginRoot.tr("DMS Ketchup", "DMS Ketchup")
                     font.pixelSize: Theme.fontSizeLarge
                     font.weight: Font.Bold
                     color: Theme.surfaceText
@@ -158,7 +158,7 @@ PanelWindow {
             }
 
             StyledText {
-                text: I18n.tr("Your break starts in ") + pluginRoot.preWarningCountdown + "s."
+                text: pluginRoot.tr("Your break starts in ", "Tu descanso empieza en ") + pluginRoot.preWarningCountdown + "s."
                 font.pixelSize: Theme.fontSizeMedium
                 color: Theme.surfaceVariantText
                 wrapMode: Text.WordWrap
@@ -172,7 +172,7 @@ PanelWindow {
                 spacing: Theme.spacingS
 
                 DankButton {
-                    text: I18n.tr("Snooze (5m)")
+                    text: pluginRoot.tr("Snooze (5m)", "Posponer (5m)")
                     iconName: "snooze"
                     backgroundColor: Theme.primaryContainer
                     textColor: Theme.primary
@@ -191,7 +191,7 @@ PanelWindow {
 
                     StyledText {
                         anchors.centerIn: parent
-                        text: I18n.tr("Skip")
+                        text: pluginRoot.tr("Skip", "Omitir")
                         font.pixelSize: Theme.fontSizeSmall
                         color: Theme.surfaceVariantText
                         opacity: parent.containsMouse ? 1.0 : 0.5

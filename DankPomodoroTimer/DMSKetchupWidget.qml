@@ -42,6 +42,10 @@ PluginComponent {
     property int preWarningTime: pluginData.preWarningTime ?? 10
     property int cycleResetHour: toIntSetting(pluginData.cycleResetHour, 4, 0, 23)
     property bool pauseMediaDuringBreaks: pluginData.pauseMediaDuringBreaks ?? true
+    property string phraseLanguage: pluginData.phraseLanguage ?? "system"
+    property var phraseTips: []
+    property var phraseCandidates: []
+    property int phraseCandidateIndex: 0
     property real preWarningOpacity: (pluginData.preWarningOpacity ?? 100) / 100
     property bool isPreWarning: false
     property var preWarningWindow: null
@@ -90,6 +94,7 @@ PluginComponent {
             awayActive = false;
             awayStartMs = 0;
             awaySnapshot = null;
+            Qt.callLater(loadPhrases);
             currentDateKey = formatDateKey(new Date());
             let savedCounter = pluginService.loadPluginState(statePluginId, "cycleCounter", -1);
             if (savedCounter === null || savedCounter === undefined || savedCounter < 0)
@@ -120,6 +125,7 @@ PluginComponent {
         bootModalSuppressUntil = Date.now() + 20000;
             deferredBreakModalPhase = "";
         lockStateProbeTimer.restart();
+        Qt.callLater(loadPhrases);
     }
 
     onBreakModalOpenChanged: {
@@ -261,7 +267,7 @@ PluginComponent {
             data.push({
                 date: dateKey,
                 count: count,
-                dayLabel: i === 0 ? root.tr("Today", "Hoy") : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
+                dayLabel: i === 0 ? root.tr("Today", "Hoy") : [root.tr("Sun", "Dom"), root.tr("Mon", "Lun"), root.tr("Tue", "Mar"), root.tr("Wed", "Mié"), root.tr("Thu", "Jue"), root.tr("Fri", "Vie"), root.tr("Sat", "Sáb")][date.getDay()]
             });
         }
 
@@ -676,6 +682,64 @@ PluginComponent {
             pluginService.savePluginState(statePluginId, "cycleCounter", 0);
         }
     }
+
+    // ── Motivational phrases ──────────────────────────────────────────
+    // Loaded from translations/<lang>.json so the phrase language can be
+    // chosen independently of the system language. The candidate chain
+    // (full locale → hyphen variant → language → en) is walked with
+    // `cat` because FileView does not report missing files reliably.
+    function phraseFilePath(lang) {
+        const dir = pluginService ? pluginService.getPluginPath(statePluginId) : "";
+        if (!dir)
+            return "";
+        return dir + "/translations/" + lang + ".json";
+    }
+
+    function phraseLoadCandidate() {
+        if (phraseCandidateIndex >= phraseCandidates.length) {
+            console.warn("[dms-ketchup] no phrase translations found for", phraseLanguage);
+            return;
+        }
+        const path = phraseFilePath(phraseCandidates[phraseCandidateIndex]);
+        Proc.runCommand("dmsKetchup.readPhrases", ["sh", "-c",
+            "cat \"" + path + "\" 2>/dev/null || true"
+        ], (stdout) => {
+            let ok = false;
+            const content = (stdout || "").trim();
+            if (content) {
+                try {
+                    const table = JSON.parse(content);
+                    const tips = table && table.tips ? Object.values(table.tips) : [];
+                    if (tips.length > 0) {
+                        phraseTips = tips;
+                        ok = true;
+                        console.info("[dms-ketchup] phrases loaded from", path, "count=", tips.length);
+                    }
+                } catch (e) {
+                    console.warn("[dms-ketchup] bad phrase translations", path, e);
+                }
+            }
+            if (!ok) {
+                phraseCandidateIndex++;
+                phraseLoadCandidate();
+            }
+        });
+    }
+
+    function loadPhrases() {
+        phraseTips = [];
+        phraseCandidateIndex = 0;
+        if (phraseLanguage === "system") {
+            const full = I18n.locale().name;
+            const lang = full ? full.split(/[_-]/)[0] : "en";
+            phraseCandidates = [full, full.replace("_", "-"), lang, "en"].filter((value, index, self) => self.indexOf(value) === index);
+        } else {
+            phraseCandidates = [phraseLanguage, "en"];
+        }
+        phraseLoadCandidate();
+    }
+
+    onPhraseLanguageChanged: Qt.callLater(loadPhrases)
 
     function startWork(autoStart, playSoundNow = true) {
         globalTimerState.set("work");

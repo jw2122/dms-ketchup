@@ -17,41 +17,37 @@ Item {
 
     visible: isOpen
 
-    // Tips 1-7 are from "take a break" (TakeABreakOverlay.qml); the rest are pomodoro/mindfulness tips added for dmsKetchup
-    property var tips: [
-        I18n.tr("Look at something 20 feet away for 20 seconds."),
-        I18n.tr("Blink 10-20 times quickly to moisten your eyes."),
-        I18n.tr("Close your eyes tightly for 2 seconds, then open them."),
-        I18n.tr("Roll your eyes clockwise, then counter-clockwise."),
-        I18n.tr("Stretch your arms and neck."),
-        I18n.tr("Drink a glass of water."),
-        I18n.tr("Look out a window to relax your eye muscles."),
-        I18n.tr("Breathe in for 4 seconds, hold for 4, breathe out for 4."),
-        I18n.tr("Stand up and walk a few steps."),
-        I18n.tr("Shake your hands and wiggle your fingers."),
-        I18n.tr("Name three things you can see, hear and feel.")
-    ]
+    // Motivational phrases, translated per the user's phrase-language setting
+    // (loaded by the widget from translations/<lang>.json)
+    readonly property var tips: (pluginRoot && pluginRoot.phraseTips && pluginRoot.phraseTips.length > 0)
+        ? pluginRoot.phraseTips
+        : []
 
-    property string currentTip: tips[0]
+    property string currentTip: ""
 
-    Component.onCompleted: {
-        currentTip = tips[Math.floor(Math.random() * tips.length)];
+    function pickTip() {
+        if (tips.length > 0)
+            currentTip = tips[Math.floor(Math.random() * tips.length)];
     }
+
+    Component.onCompleted: pickTip()
+
+    onTipsChanged: pickTip()
 
     function breakTitle() {
         if (phase === "complete")
-            return I18n.tr("Break complete");
-        return timerState === "longBreak" ? I18n.tr("Long Break") : I18n.tr("Short Break");
+            return pluginRoot.tr("Break complete", "Descanso completo");
+        return timerState === "longBreak" ? pluginRoot.tr("Long Break", "Descanso largo") : pluginRoot.tr("Short Break", "Descanso corto");
     }
 
     function breakSubtitle() {
         if (phase === "complete")
-            return I18n.tr("Press continue to begin a new work session.");
-        return I18n.tr("Focus is paused until the break ends or you skip it.");
+            return pluginRoot.tr("Press continue to begin a new work session.", "Pulsa continuar para empezar una nueva sesión de trabajo.");
+        return pluginRoot.tr("Focus is paused until the break ends or you skip it.", "El enfoque está en pausa hasta que termine el descanso o lo omitas.");
     }
 
     function actionLabel() {
-        return phase === "complete" ? I18n.tr("Continue working") : I18n.tr("Skip break");
+        return phase === "complete" ? pluginRoot.tr("Continue working", "Seguir trabajando") : pluginRoot.tr("Skip break", "Omitir descanso");
     }
 
     function breakIcon() {
@@ -190,6 +186,7 @@ Item {
                         font.pixelSize: Theme.fontSizeLarge
                         color: Theme.surfaceVariantText
                         anchors.horizontalCenter: parent.horizontalCenter
+                        visible: rootOverlay.currentTip !== ""
                     }
                 }
 

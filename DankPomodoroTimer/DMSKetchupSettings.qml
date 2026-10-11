@@ -320,7 +320,42 @@ PluginSettings {
 
     SettingsCard {
         SectionTitle {
-            text: root.tr("Statistics", "Statistiken")
+            text: root.tr("Phrases", "Frases")
+            icon: "format_quote"
+        }
+
+        SelectionSetting {
+            settingKey: "phraseLanguage"
+            label: root.tr("Phrase language", "Idioma de las frases")
+            description: root.tr("Language of the motivational phrases shown during breaks", "Idioma de las frases motivacionales que se muestran durante los descansos")
+            defaultValue: "system"
+            options: [
+                { label: root.tr("System language", "Idioma del sistema"), value: "system" },
+                { label: "English", value: "en" },
+                { label: "Deutsch", value: "de" },
+                { label: "Español", value: "es" },
+                { label: "Français", value: "fr" },
+                { label: "Italiano", value: "it" },
+                { label: "Português", value: "pt" },
+                { label: "Nederlands", value: "nl" },
+                { label: "Polski", value: "pl" },
+                { label: "Русский", value: "ru" },
+                { label: "Українська", value: "uk" },
+                { label: "Български", value: "bg" },
+                { label: "简体中文", value: "zh_CN" },
+                { label: "繁體中文", value: "zh_TW" },
+                { label: "日本語", value: "ja" },
+                { label: "한국어", value: "ko" },
+                { label: "Türkçe", value: "tr" },
+                { label: "Magyar", value: "hu" },
+                { label: "Svenska", value: "sv" }
+            ]
+        }
+    }
+
+    SettingsCard {
+        SectionTitle {
+            text: root.tr("Statistics", "Estadísticas")
             icon: "bar_chart"
         }
 
@@ -343,7 +378,7 @@ PluginSettings {
 
                 InfoTile {
                     width: (parent.width - parent.spacing) / 2
-                    label: root.tr("This Week", "Diese Woche")
+                    label: root.tr("This Week", "Esta semana")
                     value: root.stats.week + " " + root.tr("sessions", "Sesiones")
                     iconName: "date_range"
                     accentColor: Theme.info
@@ -356,7 +391,7 @@ PluginSettings {
 
                 InfoTile {
                     width: (parent.width - parent.spacing) / 2
-                    label: root.tr("Total (365 days)", "Gesamt (365 Tage)")
+                    label: root.tr("Total (365 days)", "Total (365 días)")
                     value: String(root.stats.total)
                     iconName: "analytics"
                     accentColor: Theme.success
@@ -364,7 +399,7 @@ PluginSettings {
 
                 InfoTile {
                     width: (parent.width - parent.spacing) / 2
-                    label: root.tr("Best Day", "Bester Tag")
+                    label: root.tr("Best Day", "Mejor día")
                     value: root.stats.contributors.length > 0
                         ? root.stats.contributors[0].count + " (" + root.stats.contributors[0].date + ")"
                         : "—"
@@ -374,7 +409,7 @@ PluginSettings {
             }
 
             StyledText {
-                text: root.tr("Top Days", "Top-Tage")
+                text: root.tr("Top Days", "Mejores días")
                 font.pixelSize: Theme.fontSizeSmall
                 font.weight: Font.Medium
                 color: Theme.surfaceVariantText
@@ -397,7 +432,7 @@ PluginSettings {
                 spacing: Theme.spacingS
 
                 DankButton {
-                    text: root.tr("Refresh", "Aktualisieren")
+                    text: root.tr("Refresh", "Actualizar")
                     iconName: "refresh"
                     backgroundColor: Theme.surfaceContainerHigh
                     textColor: Theme.surfaceText
@@ -407,7 +442,7 @@ PluginSettings {
                 }
 
                 DankButton {
-                    text: root.tr("Reset Stats", "Statistiken zurücksetzen")
+                    text: root.tr("Reset Stats", "Restablecer estadísticas")
                     iconName: "delete_sweep"
                     backgroundColor: Theme.withAlpha(Theme.error, 0.15)
                     textColor: Theme.error
