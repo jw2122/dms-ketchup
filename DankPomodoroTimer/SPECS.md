@@ -33,7 +33,7 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 ## Session flow
 
 1. Work session completes -> `completedPomodoros` +1 -> `cycleCounter` saved **and** `completedPomodoros-YYYY-MM-DD` incremented by 1 -> notification (only when DND is off) + sound
-2. Short break (every 4th is a long break; long iff `completedPomodoros % 4 === 0` after the increment) -> fullscreen modal on all screens
+2. Short break (every Nth is a long break, N = `sessionsPerLongBreak` setting, default 4; long iff `completedPomodoros % N === 0` after the increment) -> fullscreen modal on all screens
 3. Manual continue (`requireManualContinueAfterBreak`) -> `startWork()`
 4. Pre-warning toast `preWarningTime` (default 10 s) before a session ends
 
@@ -101,6 +101,7 @@ Return:
 - Durations use `SliderSettingPlus` sliders (take-a-break style): Work 5–60 min (default 25), Short Break 1–10 min (default 5), Long Break 1–30 min (default 15); stored as integers, sanitized by `toDuration()` (old string values keep working until the slider is moved once)
 - Pre-warning lead time: slider 5–60 s
 - Cycle reset time: slider 0–23 h (default 4)
+- Sessions before long break: slider 1–10 (default 4) — the cycle length; the popout shows "Next long break after N more"
 - Pause media during breaks: toggle (default on) — Behavior card
 - Phrase language: selection, "System language" (default) + the 18 shipped languages — Phrases card
 

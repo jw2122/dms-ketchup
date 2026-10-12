@@ -179,6 +179,18 @@ PluginSettings {
                 leftLabel: "1m"
                 rightLabel: "30m"
             }
+
+            SliderSettingPlus {
+                settingKey: "sessionsPerLongBreak"
+                label: root.tr("Sessions before long break", "Sesiones antes del descanso largo")
+                description: root.tr("How many work sessions make up one cycle", "Cuántas sesiones de trabajo forman un ciclo")
+                defaultValue: 4
+                minimum: 1
+                maximum: 10
+                unit: ""
+                leftLabel: "1"
+                rightLabel: "10"
+            }
         }
     }
 
@@ -486,7 +498,7 @@ PluginSettings {
             }
 
             StyledText {
-                text: root.tr("DMS Ketchup squeezes focused work sessions into short bursts, followed by breaks to recharge. After 4 sessions, take a longer break.\n\n• Work: 25 minutes of focused work\n• Short Break: 5 minute rest\n• Long Break: 15 minutes after 4 sessions\n\nNotifications will alert you when each session completes.", "DMS Ketchup exprime las sesiones de trabajo en ráfagas cortas, seguidas de descansos para recargar. Después de 4 sesiones, toma un descanso largo.\n\n• Trabajo: 25 minutos de trabajo concentrado\n• Descanso corto: 5 minutos de pausa\n• Descanso largo: 15 minutos después de 4 sesiones\n\nLas notificaciones te avisarán cuando termine cada sesión.")
+                text: root.tr("DMS Ketchup squeezes focused work sessions into short bursts, followed by breaks to recharge. After " + root.sessionsPerLongBreak + " sessions, take a longer break.\n\n• Work: " + root.workDuration + " minutes of focused work\n• Short Break: " + root.shortBreakDuration + " minute rest\n• Long Break: " + root.longBreakDuration + " minutes after " + root.sessionsPerLongBreak + " sessions\n\nNotifications will alert you when each session completes.", "DMS Ketchup exprime las sesiones de trabajo en ráfagas cortas, seguidas de descansos para recargar. Después de " + root.sessionsPerLongBreak + " sesiones, toma un descanso largo.\n\n• Trabajo: " + root.workDuration + " minutos de trabajo concentrado\n• Descanso corto: " + root.shortBreakDuration + " minutos de pausa\n• Descanso largo: " + root.longBreakDuration + " minutos después de " + root.sessionsPerLongBreak + " sesiones\n\nLas notificaciones te avisarán cuando termine cada sesión.")
                 font.pixelSize: Theme.fontSizeSmall
                 color: Theme.surfaceVariantText
                 wrapMode: Text.WordWrap

@@ -30,6 +30,7 @@ PluginComponent {
     property real workDuration: toDuration(pluginData.workDuration, 25)
     property real shortBreakDuration: toDuration(pluginData.shortBreakDuration, 5)
     property real longBreakDuration: toDuration(pluginData.longBreakDuration, 15)
+    property int sessionsPerLongBreak: toIntSetting(pluginData.sessionsPerLongBreak, 4, 1, 10)
     property bool autoStartBreaks: pluginData.autoStartBreaks ?? false
     property bool autoStartPomodoros: pluginData.autoStartPomodoros ?? false
     property bool autoSetDND: pluginData.autoSetDND ?? false
@@ -394,7 +395,7 @@ PluginComponent {
                 pluginService.savePluginState(statePluginId, "cycleCounter", globalCompletedPomodoros.value);
                 loadLast7Days();
             }
-            const isLongBreak = globalCompletedPomodoros.value % 4 === 0;
+            const isLongBreak = globalCompletedPomodoros.value % root.sessionsPerLongBreak === 0;
             root.startCycleBreak(isLongBreak);
         } else {
             root.finishBreak();
@@ -645,7 +646,7 @@ PluginComponent {
     }
 
     function cycleBreakIsLong() {
-        return globalCompletedPomodoros.value > 0 && globalCompletedPomodoros.value % 4 === 0;
+        return globalCompletedPomodoros.value > 0 && globalCompletedPomodoros.value % root.sessionsPerLongBreak === 0;
     }
 
     function checkCycleReset() {
@@ -1183,7 +1184,7 @@ PluginComponent {
                         }
 
                         StyledText {
-                            text: root.tr("Next long break after " + (4 - (globalCompletedPomodoros.value % 4)) + " more", "El siguiente descanso largo después de " + (4 - (globalCompletedPomodoros.value % 4)) + " más")
+                            text: root.tr("Next long break after " + (root.sessionsPerLongBreak - (globalCompletedPomodoros.value % root.sessionsPerLongBreak)) + " more", "El siguiente descanso largo después de " + (root.sessionsPerLongBreak - (globalCompletedPomodoros.value % root.sessionsPerLongBreak)) + " más")
                             font.pixelSize: Theme.fontSizeSmall
                             color: Theme.surfaceVariantText
                             leftPadding: Theme.iconSize + Theme.spacingM

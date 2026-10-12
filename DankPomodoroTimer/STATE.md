@@ -9,7 +9,7 @@
 ## Environment
 
 - `dmsKetchup` enabled in `~/.config/DankMaterialShell/plugin_settings.json`
-  - Current values are the user's active test values: `workDuration: "1"`, `shortBreakDuration: "1"`, `longBreakDuration: "1,5"` (comma decimal — handled by `toDuration()`)
+  - Current values are the user's active test values: `workDuration: "1"`, `shortBreakDuration: "1"` (long break was fixed from a stale `"1,5"` string to `15`)
 - `dankPomodoroTimer` (Avenge Media v1.1.6, installed first-party at `plugins/DankPomodoroTimer/`) — disabled; reference implementation for multi-screen display
 - `dmsPomodoro` and `pomodoroCopy` also enabled (other pomodoro plugins)
 - dmsKetchup and dankPomodoroTimer share the IPC target `pomodoroTimer` — only one may be enabled at a time
@@ -47,6 +47,7 @@
 - [x] Removed dangling `initGuardTimer.restart()` calls (referenced but never defined — threw ReferenceError on every start)
 - [x] Media pause: every playing Mpris player (`isPlaying && canPause`) is paused when a short/long break starts (covers completion, cycle breaks, quick actions, skip); deliberately no resume; `pauseMediaDuringBreaks` toggle (default on) in the Behavior card — verified live ("paused 1 media player(s)")
 - [x] Phrase translations: 11 tips in 18 languages under `translations/<lang>.json`; `phraseLanguage` setting (default `system`, candidate chain full locale → hyphen variant → language → en); modal picks a random phrase and hides the line when empty; verified system fallback (de_AT → de.json) and explicit selection (ja.json)
+- [x] Sessions-per-long-break slider (`sessionsPerLongBreak`, 1–10, default 4) replacing the hardcoded `% 4` in the completion path, `cycleBreakIsLong()` and the popout "Next long break after N more" text; About card now shows live values instead of hardcoded numbers; fixed stale `"longBreakDuration": "1,5"` in plugin_settings.json (slider can't represent comma decimals — it was running 1.5 min long breaks while the UI implied 15)
 
 ## Known limitations / to verify later
 
