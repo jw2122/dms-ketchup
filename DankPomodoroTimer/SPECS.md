@@ -39,7 +39,9 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 ## Media pause
 
-- When a short or long break starts (natural completion, cycle break, quick action or skip), every Mpris player with `isPlaying && canPause` is paused via `MprisController.availablePlayers`
+- Media is paused when a break countdown **actually starts running**: auto-started breaks (natural completion, cycle break, IPC) and the manual start (popout play button → `toggleTimer`)
+- Every Mpris player with `isPlaying && canPause` is paused via `MprisController.availablePlayers`
+- The quick-action buttons only **arm** a break (countdown at full duration, not running) — they do not pause media; the pause happens when the user presses play
 - There is deliberately **no resume**: players stay paused until the user resumes them
 - Setting `pauseMediaDuringBreaks` (default on) disables the pause entirely
 

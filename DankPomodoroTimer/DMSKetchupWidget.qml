@@ -781,7 +781,6 @@ PluginComponent {
 
     function startShortBreak(autoStart, openModal = false, playSoundNow = true) {
         root.closePreWarning();
-        root.pauseMediaPlayers();
         console.log("[pomodoro-debug] startShortBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
         if (root.autoSetDND) {
             SessionData.setDoNotDisturb(false);
@@ -793,6 +792,8 @@ PluginComponent {
         globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
+        if (autoStart ?? false)
+            root.pauseMediaPlayers();
         if ((autoStart ?? false) || playSoundNow)
             globalTimerDisplayActive.set(true);
         if (playSoundNow)
@@ -807,7 +808,6 @@ PluginComponent {
 
     function startLongBreak(autoStart, openModal = false, playSoundNow = true) {
         root.closePreWarning();
-        root.pauseMediaPlayers();
         console.log("[pomodoro-debug] startLongBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
         if (root.autoSetDND) {
             SessionData.setDoNotDisturb(false);
@@ -819,6 +819,8 @@ PluginComponent {
         globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
         globalTimerOwnerId.set(root.instanceId);
         globalIsRunning.set(autoStart ?? false);
+        if (autoStart ?? false)
+            root.pauseMediaPlayers();
         if ((autoStart ?? false) || playSoundNow)
             globalTimerDisplayActive.set(true);
         if (playSoundNow)
@@ -840,6 +842,8 @@ PluginComponent {
             }
         }
         globalIsRunning.set(!globalIsRunning.value);
+        if (globalIsRunning.value && globalTimerState.value !== "work")
+            root.pauseMediaPlayers();
         if (root.autoSetDND && globalTimerState.value === "work") {
             SessionData.setDoNotDisturb(globalIsRunning.value);
         }
