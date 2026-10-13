@@ -38,6 +38,7 @@ PluginComponent {
     property string currentDateKey: ""
     property bool fullscreenBreakModalEnabled: pluginData.fullscreenBreakModalEnabled ?? true
     property bool requireManualContinueAfterBreak: pluginData.requireManualContinueAfterBreak ?? true
+    property bool autoStartWorkOnUnlock: pluginData.autoStartWorkOnUnlock ?? false
     property bool soundsEnabled: pluginData.soundsEnabled ?? true
     property bool enablePreWarning: pluginData.enablePreWarning ?? true
     property int preWarningTime: pluginData.preWarningTime ?? 10
@@ -670,10 +671,25 @@ PluginComponent {
     function handleUnlocked() {
         sessionLocked = false;
         endAway();
+        // A break that finished while the screen was locked either deferred its
+        // modal (probe/startup path) or opened it directly behind the lock
+        // screen (default loginctl-signal path) — catch both.
+        const breakFinished = root.deferredBreakModalPhase === "complete"
+            || (root.breakModalOpen && root.breakModalPhase === "complete");
+        if (root.autoStartWorkOnUnlock && breakFinished) {
+            root.deferredBreakModalPhase = "";
+            root.breakModalArmed = false;
+            root.closeBreakModal();
+            root.startWork(root.autoStartPomodoros, true);
+            return;
+        }
         if (root.deferredBreakModalPhase !== "") {
             const phase = root.deferredBreakModalPhase;
             root.deferredBreakModalPhase = "";
             openBreakModal(phase);
+        } else if (root.autoStartWorkOnUnlock && !globalTimerDisplayActive.value) {
+            // No session running at all (fresh boot or reset) — start one
+            root.startWork(true, true);
         }
     }
 

@@ -37,6 +37,15 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 3. Manual continue (`requireManualContinueAfterBreak`) -> `startWork()`
 4. Pre-warning toast `preWarningTime` (default 10 s) before a session ends
 
+## Unlock behavior (`autoStartWorkOnUnlock`, default off)
+
+All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals, plus the loginctl probe fallback) funnel into `handleUnlocked()`. With the toggle on:
+
+- Break finished while the screen was locked (deferred `"complete"` modal, or the modal opened behind the lock screen in the default loginctl-signal config) -> next work session starts immediately (respects `autoStartPomodoros`), no modal
+- Break still counting down while locked -> modal re-opens as before (a live break is not cut short)
+- Work session was running -> away logic restores/resumes it as before
+- No session running at all (fresh boot, or after Reset) -> a fresh work session starts — "whenever I want to use the device"
+
 ## Media pause
 
 - Media is paused when a break countdown **actually starts running**: auto-started breaks (natural completion, cycle break, IPC) and the manual start (popout play button → `toggleTimer`)
@@ -104,6 +113,7 @@ Return:
 - Pre-warning lead time: slider 5–60 s
 - Cycle reset time: slider 0–23 h (default 4)
 - Sessions before long break: slider 1–10 (default 4) — the cycle length; the popout shows "Next long break after N more"
+- Start pomodoro on unlock: toggle (default off) — Behavior card
 - Pause media during breaks: toggle (default on) — Behavior card
 - Phrase language: selection, "System language" (default) + the 18 shipped languages — Phrases card
 

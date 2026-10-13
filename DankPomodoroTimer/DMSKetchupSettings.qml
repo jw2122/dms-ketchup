@@ -228,6 +228,13 @@ PluginSettings {
             }
 
             ToggleSetting {
+                settingKey: "autoStartWorkOnUnlock"
+                label: root.tr("Start pomodoro on unlock", "Iniciar pomodoro al desbloquear")
+                description: root.tr("Whenever you unlock the screen, make sure a work session is running — continues after a break that finished while locked, or starts a fresh one if none was running", "Al desbloquear la pantalla, asegura que haya una sesión de trabajo activa: continúa después de un descanso que terminó mientras la pantalla estaba bloqueada, o inicia una nueva si no había ninguna")
+                defaultValue: false
+            }
+
+            ToggleSetting {
                 settingKey: "soundsEnabled"
                 label: root.tr("Ketchup sounds", "Sonidos de Ketchup")
                 description: root.tr("Play a short sound when sessions start and end", "Reproduce un sonido corto cuando las sesiones empiezan y terminan")
