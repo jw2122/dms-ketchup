@@ -111,6 +111,7 @@ Return:
 | break (suspend) | remaining − away <= 0 | Break treated as finished -> break-complete flow (next work session) |
 
 - Screen unlock / resume consumes the deferred break modal (the old `deferredBreakModalPhase` was written but never read — fixed)
+- The deferred phase is **preserved** at lock time: a "complete" modal (break finished, waiting for continue) stays "complete" — it used to be hardcoded to "running", which re-opened a 0:00 running overlay with a Skip button instead of the continue screen. `handleUnlocked()` also upgrades a stale "running" phase to "complete" when the modal already re-opened as "complete" behind the lock screen.
 - Detection: `SessionService` push signals (`preparingForSleep` → suspend; `sessionLocked` / `sessionUnlocked` / `sessionResumed`, driven by loginctl and on by default via `loginctlLockIntegration`) are the primary path. The 30 s `dms ipc call lock isLocked` probe runs only as a fallback when that integration is disabled, and only while a session is active (`timerDisplayActive`) — zero polling in the default configuration. Lid close while locked upgrades the cause to suspend.
 
 ## Settings

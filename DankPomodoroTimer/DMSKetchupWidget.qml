@@ -166,7 +166,7 @@ PluginComponent {
                 if (locked) {
                     if (root.breakModalOpen) {
                         root.closeBreakModal();
-                        root.deferredBreakModalPhase = "running";
+                        root.deferredBreakModalPhase = root.breakModalPhase;
                     }
                     beginAway("lock");
                 } else if (changed) {
@@ -204,7 +204,7 @@ PluginComponent {
         function onSessionLocked() {
             if (root.breakModalOpen) {
                 root.closeBreakModal();
-                root.deferredBreakModalPhase = "running";
+                root.deferredBreakModalPhase = root.breakModalPhase;
             }
             beginAway("lock");
         }
@@ -694,8 +694,12 @@ PluginComponent {
             return;
         }
         if (root.deferredBreakModalPhase !== "") {
-            const phase = root.deferredBreakModalPhase;
+            let phase = root.deferredBreakModalPhase;
             root.deferredBreakModalPhase = "";
+            // Don't let a stale "running" phase downgrade a break that
+            // actually finished behind the lock screen.
+            if (root.breakModalOpen && root.breakModalPhase === "complete")
+                phase = "complete";
             openBreakModal(phase);
         } else if (root.autoStartWorkOnUnlock && !globalTimerDisplayActive.value) {
             // No session running at all (fresh boot or reset) — start one
