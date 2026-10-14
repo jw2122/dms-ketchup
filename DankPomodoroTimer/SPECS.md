@@ -46,6 +46,12 @@ All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals,
 - Work session was running -> away logic restores/resumes it as before
 - No session running at all (fresh boot, or after Reset) -> a fresh work session starts — "whenever I want to use the device"
 
+## Startup behavior (`autoStartWorkOnStartup`, default off)
+
+- When the shell starts (boot, SDDM login, `dms restart`) and no session is running (`timerDisplayActive` false), a fresh work session starts
+- Deferred via `Qt.callLater` — the base `PluginComponent` populates `pluginData` in its own `Component.onCompleted`, which runs after the widget's, so an inline check reads empty settings
+- The second bar instance skips (the first one sets `timerDisplayActive`) — no double start, no double sound
+
 ## Media pause
 
 - Media is paused when a break countdown **actually starts running**: auto-started breaks (natural completion, cycle break, IPC) and the manual start (popout play button → `toggleTimer`)
@@ -114,6 +120,7 @@ Return:
 - Cycle reset time: slider 0–23 h (default 4)
 - Sessions before long break: slider 1–10 (default 4) — the cycle length; the popout shows "Next long break after N more"
 - Start pomodoro on unlock: toggle (default off) — Behavior card
+- Start pomodoro on startup: toggle (default off) — Behavior card; starts a session when the shell starts with none running
 - Pause media during breaks: toggle (default on) — Behavior card
 - Phrase language: selection, "System language" (default) + the 18 shipped languages — Phrases card
 

@@ -235,6 +235,13 @@ PluginSettings {
             }
 
             ToggleSetting {
+                settingKey: "autoStartWorkOnStartup"
+                label: root.tr("Start pomodoro on startup", "Iniciar pomodoro al iniciar")
+                description: root.tr("When the shell starts (e.g. after logging in), start a work session if none is running", "Al iniciarse el shell (p. ej. tras iniciar sesión), inicia una sesión de trabajo si no hay ninguna activa")
+                defaultValue: false
+            }
+
+            ToggleSetting {
                 settingKey: "soundsEnabled"
                 label: root.tr("Ketchup sounds", "Sonidos de Ketchup")
                 description: root.tr("Play a short sound when sessions start and end", "Reproduce un sonido corto cuando las sesiones empiezan y terminan")

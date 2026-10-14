@@ -39,6 +39,7 @@ PluginComponent {
     property bool fullscreenBreakModalEnabled: pluginData.fullscreenBreakModalEnabled ?? true
     property bool requireManualContinueAfterBreak: pluginData.requireManualContinueAfterBreak ?? true
     property bool autoStartWorkOnUnlock: pluginData.autoStartWorkOnUnlock ?? false
+    property bool autoStartWorkOnStartup: pluginData.autoStartWorkOnStartup ?? false
     property bool soundsEnabled: pluginData.soundsEnabled ?? true
     property bool enablePreWarning: pluginData.enablePreWarning ?? true
     property int preWarningTime: pluginData.preWarningTime ?? 10
@@ -128,6 +129,15 @@ PluginComponent {
             deferredBreakModalPhase = "";
         lockStateProbeTimer.restart();
         Qt.callLater(loadPhrases);
+        // Deferred: PluginComponent populates pluginData in its own
+        // Component.onCompleted, which runs after this one.
+        Qt.callLater(() => {
+            if (root.autoStartWorkOnStartup && !globalTimerDisplayActive.value) {
+                // No session running (fresh boot / login) — start one
+                console.info("[dms-ketchup] auto-starting work session at startup");
+                root.startWork(true, true);
+            }
+        });
     }
 
     onBreakModalOpenChanged: {
