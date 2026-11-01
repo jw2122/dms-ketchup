@@ -732,7 +732,9 @@ PluginComponent {
             return;
         }
         const path = phraseFilePath(phraseCandidates[phraseCandidateIndex]);
-        Proc.runCommand("dmsKetchup.readPhrases", ["sh", "-c",
+        // Proc.runCommand keys callbacks by id, so a shared id makes the two
+        // bar instances overwrite each other and only one loads phrases.
+        Proc.runCommand("dmsKetchup.readPhrases." + root.instanceId, ["sh", "-c",
             "cat \"" + path + "\" 2>/dev/null || true"
         ], (stdout) => {
             let ok = false;
@@ -974,8 +976,9 @@ PluginComponent {
               StyledText {
                   visible: globalTimerDisplayActive.value
                   text: root.getCountdownText(globalRemainingSeconds.value, false, true)
+                  font.family: Theme.fontFamily
                   font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
-                  font.weight: Font.Medium
+                  font.weight: Theme.fontWeightMedium
                   color: globalShowSecondsOnly.value ? Theme.primary : Theme.surfaceVariantText
                   opacity: globalShowSecondsOnly.value ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
                   anchors.verticalCenter: parent.verticalCenter
@@ -997,8 +1000,9 @@ PluginComponent {
               StyledText {
                   visible: globalTimerDisplayActive.value
                   text: root.getCountdownText(globalRemainingSeconds.value, true, true)
+                  font.family: Theme.fontFamily
                   font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale)
-                  font.weight: Font.Medium
+                  font.weight: Theme.fontWeightMedium
                   color: globalShowSecondsOnly.value ? Theme.primary : Theme.surfaceVariantText
                   opacity: globalShowSecondsOnly.value ? (root.blinkVisible ? 1.0 : 0.0) : 1.0
                   anchors.horizontalCenter: parent.horizontalCenter
@@ -1048,6 +1052,7 @@ PluginComponent {
                                 var ctx = getContext("2d");
                                 ctx.clearRect(0, 0, width, height);
                                 ctx.lineWidth = 8;
+                                ctx.lineCap = "round";
                                 ctx.strokeStyle = root.getStateColor();
                                 ctx.beginPath();
                                 const centerX = width / 2;
@@ -1074,6 +1079,7 @@ PluginComponent {
 
                             StyledText {
                                 text: root.getCountdownText(globalRemainingSeconds.value)
+                                font.family: "monospace"
                                 font.pixelSize: 36
                                 font.weight: Font.Bold
                                 color: root.getStateColor()
@@ -1106,13 +1112,14 @@ PluginComponent {
                         width: 64
                         height: 64
                         radius: 32
-                        color: playArea.containsMouse ? Qt.rgba(root.getStateColor().r, root.getStateColor().g, root.getStateColor().b, 0.2) : "transparent"
+                        color: root.getStateColor()
+                        opacity: playArea.containsMouse ? 0.88 : 1
 
                         DankIcon {
                             anchors.centerIn: parent
                             name: globalIsRunning.value ? "pause" : "play_arrow"
                             size: 32
-                            color: root.getStateColor()
+                            color: Theme.primaryText
                         }
 
                         MouseArea {
@@ -1125,16 +1132,17 @@ PluginComponent {
                     }
 
                     Rectangle {
-                        width: 64
-                        height: 64
-                        radius: 32
-                        color: resetArea.containsMouse ? Theme.surfaceContainerHighest : "transparent"
+                        width: 56
+                        height: 56
+                        radius: 28
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: resetArea.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainer
 
                         DankIcon {
                             anchors.centerIn: parent
                             name: "refresh"
-                            size: 24
-                            color: Theme.surfaceText
+                            size: 22
+                            color: Theme.surfaceVariantText
                         }
 
                         MouseArea {
@@ -1157,32 +1165,39 @@ PluginComponent {
                         color: Theme.surfaceVariantText
                     }
 
-                    Row {
-                        id: quickActionsRow
+                    // Keep the three actions on one line, sized to their
+                    // labels. The reduced padding leaves enough room for the
+                    // full "Short break" / "Long break" text at the default
+                    // 400 px popout width, even with a wide theme font.
+                    Item {
                         width: parent.width
-                        spacing: Theme.spacingS
+                        height: quickActionsRow.implicitHeight
 
-                        property real buttonWidth: (width - spacing * 2) / 3
+                        Row {
+                            id: quickActionsRow
+                            anchors.centerIn: parent
+                            spacing: Theme.spacingS
 
-                        DankButton {
-                            text: root.tr("Work", "Trabajo")
-                            iconName: "work"
-                            width: quickActionsRow.buttonWidth
-                            onClicked: root.startWork(true)
-                        }
+                            DankButton {
+                                text: root.tr("Work", "Trabajo")
+                                iconName: "work"
+                                horizontalPadding: Theme.spacingS
+                                onClicked: root.startWork(true)
+                            }
 
-                        DankButton {
-                            text: root.tr("Short break", "Desc. corto")
-                            iconName: "coffee"
-                            width: quickActionsRow.buttonWidth
-                            onClicked: root.startShortBreak(false)
-                        }
+                            DankButton {
+                                text: root.tr("Short break", "Desc. corto")
+                                iconName: "coffee"
+                                horizontalPadding: Theme.spacingS
+                                onClicked: root.startShortBreak(false)
+                            }
 
-                        DankButton {
-                            text: root.tr("Long break", "Desc. largo")
-                            iconName: "weekend"
-                            width: quickActionsRow.buttonWidth
-                            onClicked: root.startLongBreak(false)
+                            DankButton {
+                                text: root.tr("Long break", "Desc. largo")
+                                iconName: "weekend"
+                                horizontalPadding: Theme.spacingS
+                                onClicked: root.startLongBreak(false)
+                            }
                         }
                     }
                 }

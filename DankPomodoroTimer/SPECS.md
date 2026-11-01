@@ -2,7 +2,7 @@
 
 DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
-- Plugin id: `dmsKetchup` (author: Virtual Wolf 369, version 1.2.0, MIT)
+- Plugin id: `dmsKetchup` (author: Virtual Wolf 369, version 1.3.0, MIT)
 - Source repo: `~/.config/DankMaterialShell/plugins/.repos/39b15ac4661f477a/DankPomodoroTimer/`
 
 ## Files
@@ -12,10 +12,13 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 | `DMSKetchupWidget.qml` | Widget: bar pill (horizontal/vertical), popout, timer engine |
 | `DMSKetchupSettings.qml` | Settings page + statistics dashboard |
 | `DMSKetchupFullscreenModal.qml` | Break modal — one `PanelWindow` per screen (`Repeater { model: Quickshell.screens }`) |
+| `DMSKetchupLockWidget.qml` | Desktop/lock-screen widget (`desktop` surface, DMS 2.0 lock screen) |
 | `DMSKetchupPreWarningToast.qml` | Pre-warning toast (primary screen only) |
 | `translations/` | Motivational phrases, one `<lang>.json` per language (18 languages) |
 | `dms-common/` | Design-system components copied from takeABreak (SettingsCard, SectionTitle, InfoTile, DankButton, ...) |
 | `plugin.json` / `qmldir` | Plugin manifest / QML module |
+
+`plugin.json` declares both surfaces: the legacy `"component"` (bar widget, older DMS fallback) and `"components": { "widget": ..., "desktop": ... }`, which DMS 2.0's `_resolveComponentPaths` prefers. The `desktop` surface makes the timer available in both the desktop-widget and lock-screen-widget libraries (plugin desktop surfaces are listed in both; there is no lock-only flag).
 
 ## Timer model
 
@@ -29,6 +32,23 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 - >= 60 s: minutes only (`MM`)
 - < 60 s: seconds only, blinking — 800 ms on / 200 ms off; blink phase derived from `Date.now()` so all screens blink in sync
+
+## Design & typography
+
+- **Bar pill** text uses the DMS system font (`Theme.fontFamily`) and `Theme.fontWeightMedium`, so it matches every other bar widget instead of inheriting the plugin font.
+- **Countdown numerals** (break modal, popout, lock widget) use `font.family: "monospace"` — the fontconfig system default monospace; `qs.Common` does not export `Fonts.systemMono` to plugins.
+- **Modal quote / tip** also uses the system monospace font, one size below the subtitle.
+- Break modal: centered card (`Theme.cornerRadiusXL`, `Theme.foregroundColor(Theme.cardSurface)`, 1 px `outlineMedium`), tinted state-icon badge, state-colored 96 px countdown, rounded progress track, primary "Continue working" button, subtle "Skip break" pill, and a soft top gradient tinted by the state color.
+- State colors: `Theme.primary` (work), `Theme.info` (short break), `Theme.warning` (long break), `Theme.success` (break complete).
+- Popout: monospace countdown with a rounded-cap Canvas ring, filled primary play/pause circle, tonal reset circle, intrinsic-width quick-action pills in a centered row.
+
+## Lock-screen / desktop widget
+
+- `DMSKetchupLockWidget.qml` extends `DesktopPluginComponent` and renders a glass-style card: state dot + label (READY / FOCUS / PAUSED / BREAK COMPLETE / SHORT|LONG BREAK), large monospace countdown, progress bar, "Session N of M" footer and the session length.
+- It owns no timer: it reads the bar widget's shared `PluginGlobalVar`s (`remainingSeconds`, `totalSeconds`, `isRunning`, `timerState`, `completedPomodoros`, `timerDisplayActive`), so the lock screen always mirrors the live session.
+- On the lock screen it uses `lockHost.contentColor(...)`, `SettingsData.lockScreenFontFamily` for labels, and `Theme.readableSurface` / `Theme.outlineMedium` for the card; on the desktop it uses `Theme.surfaceText` and `Theme.fontFamily`.
+- Idle state (no session) shows the configured work duration and "No session running"; session numbering starts at 1 and wraps to `sessionsPerLongBreak` after a full cycle.
+- The user instance lives in `settings.json` → `lockScreenWidgetInstances` (`widgetType: "dmsKetchup"`); its position is stored in `session.json` → `desktopWidgetInstancePositions.lock_ketchup` (`_synced`, top-right).
 
 ## Session flow
 
@@ -66,7 +86,8 @@ All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals,
 - 18 languages ship: en, de, es, fr, it, pt, nl, pl, ru, uk, bg, zh_CN, zh_TW, ja, ko, tr, hu, sv; anything else falls back to English
 - Setting `phraseLanguage` (default `system`): `system` resolves the system locale through a candidate chain (full locale → hyphen variant → language → en); an explicit language loads `translations/<lang>.json` with an en fallback
 - The chain is walked with `cat` via `Proc.runCommand`, because `FileView` does not report missing files reliably (it fires neither `onLoaded` nor `onLoadFailed` for a nonexistent path)
-- The modal picks a random phrase from the loaded table (re-picks when the table changes) and hides the tip line when nothing loaded
+- `Proc.runCommand` keys callbacks by id: the id is suffixed with the widget `instanceId`, otherwise the two bar instances overwrite each other and only one loads the table
+- The modal picks a random phrase when it opens (and again when the table changes) and hides the tip line when nothing loaded
 
 ## Cycle reset hour
 

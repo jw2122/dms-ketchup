@@ -2,3 +2,4 @@ module DMSKetchup
 DMSKetchupWidget 1.0 DMSKetchupWidget.qml
 DMSKetchupSettings 1.0 DMSKetchupSettings.qml
 DMSKetchupFullscreenModal 1.0 DMSKetchupFullscreenModal.qml
+DMSKetchupLockWidget 1.0 DMSKetchupLockWidget.qml

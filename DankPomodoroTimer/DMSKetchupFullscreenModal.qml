@@ -34,6 +34,13 @@ Item {
 
     onTipsChanged: pickTip()
 
+    // Fresh quote for every break, even if the phrase table finished loading
+    // before this overlay switched to visible.
+    onIsOpenChanged: {
+        if (isOpen)
+            pickTip();
+    }
+
     function breakTitle() {
         if (phase === "complete")
             return pluginRoot.tr("Break complete", "Descanso completo");
@@ -54,6 +61,16 @@ Item {
         if (phase === "complete")
             return "check_circle";
         return timerState === "longBreak" ? "weekend" : "coffee";
+    }
+
+    function stateColor() {
+        if (phase === "complete")
+            return Theme.success;
+        if (timerState === "longBreak")
+            return Theme.warning;
+        if (timerState === "shortBreak")
+            return Theme.info;
+        return Theme.primary;
     }
 
     function getCountdownText(seconds) {
@@ -127,105 +144,152 @@ Item {
                         }
                     }
 
-                Column {
+                // Soft tint so the overlay doesn't read as a flat void
+                Rectangle {
+                    anchors.fill: parent
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Theme.withAlpha(rootOverlay.stateColor(), 0.10) }
+                        GradientStop { position: 0.55; color: "transparent" }
+                    }
+                }
+
+                StyledRect {
+                    id: breakCard
+                    width: Math.min(parent.width - Theme.spacingXL * 2, 560)
+                    height: cardContent.implicitHeight + Theme.spacingXL * 2
                     anchors.centerIn: parent
-                    spacing: Theme.spacingL
+                    radius: Theme.cornerRadiusXL
+                    color: Theme.foregroundColor(Theme.cardSurface)
+                    border.width: Theme.layerOutlineWidth
+                    border.color: Theme.outlineMedium
 
-                    DankIcon {
-                        name: rootOverlay.breakIcon()
-                        size: 80
-                        color: Theme.primary
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
+                    Column {
+                        id: cardContent
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: Theme.spacingXL
+                        spacing: Theme.spacingL
 
-                    StyledText {
-                        text: rootOverlay.breakTitle()
-                        font.pixelSize: Theme.fontSizeExtraLarge * 2
-                        font.weight: Font.Bold
-                        color: Theme.surfaceText
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
+                        StyledRect {
+                            width: 88
+                            height: 88
+                            radius: 44
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: Theme.withAlpha(rootOverlay.stateColor(), 0.12)
 
-                    StyledText {
-                         text: rootOverlay.getCountdownText(rootOverlay.remainingSeconds)
-                        font.pixelSize: 120
-                        font.weight: Font.Bold
-                        font.family: "monospace"
-                        color: Theme.primary
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: rootOverlay.phase !== "complete"
-                    }
+                            DankIcon {
+                                anchors.centerIn: parent
+                                name: rootOverlay.breakIcon()
+                                size: 44
+                                color: rootOverlay.stateColor()
+                            }
+                        }
 
-                    Rectangle {
-                        width: 240
-                        height: 8
-                        radius: 4
-                        color: Theme.withAlpha(Theme.surfaceContainerHighest, 0.85)
-                        clip: true
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: rootOverlay.phase !== "complete"
+                        StyledText {
+                            width: parent.width
+                            text: rootOverlay.breakTitle()
+                            font.pixelSize: Theme.fontSizeXXLarge
+                            font.weight: Font.Bold
+                            color: Theme.surfaceText
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                        }
 
-                        Rectangle {
-                            width: parent.width * rootOverlay.barProgress
-                            height: parent.height
-                            radius: 4
-                            color: Theme.primary
-                            Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+                        StyledText {
+                            width: parent.width
+                            text: rootOverlay.getCountdownText(rootOverlay.remainingSeconds)
+                            font.family: "monospace"
+                            font.pixelSize: 96
+                            font.weight: Font.Bold
+                            color: rootOverlay.stateColor()
+                            horizontalAlignment: Text.AlignHCenter
+                            visible: rootOverlay.phase !== "complete"
+                        }
+
+                        StyledRect {
+                            width: parent.width
+                            height: 6
+                            radius: 3
+                            color: Theme.withAlpha(rootOverlay.stateColor(), 0.16)
+                            visible: rootOverlay.phase !== "complete"
+
+                            Rectangle {
+                                width: parent.width * Math.max(0, Math.min(1, rootOverlay.barProgress))
+                                height: parent.height
+                                radius: parent.radius
+                                color: rootOverlay.stateColor()
+                                Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+                            }
+                        }
+
+                        StyledText {
+                            width: parent.width
+                            text: rootOverlay.breakSubtitle()
+                            font.pixelSize: Theme.fontSizeMedium
+                            color: Theme.surfaceVariantText
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                        }
+
+                        StyledText {
+                            width: parent.width
+                            text: rootOverlay.currentTip
+                            font.family: "monospace"
+                            font.pixelSize: Theme.fontSizeMedium
+                            color: Theme.surfaceVariantText
+                            opacity: 0.85
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            visible: rootOverlay.currentTip !== "" && rootOverlay.phase !== "complete"
+                        }
+
+                        DankButton {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: rootOverlay.phase === "complete"
+                            buttonHeight: 52
+                            horizontalPadding: Theme.spacingXL
+                            iconSize: 24
+                            iconName: "play_arrow"
+                            text: rootOverlay.actionLabel()
+                            backgroundColor: Theme.primary
+                            textColor: Theme.primaryText
+                            onClicked: rootOverlay.onAction()
+                        }
+
+                        Item {
+                            width: parent.width
+                            height: skipPill.height
+                            visible: rootOverlay.phase !== "complete"
+
+                            StyledRect {
+                                id: skipPill
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: skipText.implicitWidth + Theme.spacingXL * 2
+                                height: 40
+                                radius: 20
+                                color: skipArea.containsMouse
+                                    ? Theme.withAlpha(Theme.surfaceText, 0.08)
+                                    : Theme.withAlpha(Theme.surfaceText, 0.03)
+
+                                StyledText {
+                                    id: skipText
+                                    anchors.centerIn: parent
+                                    text: rootOverlay.actionLabel()
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.surfaceVariantText
+                                }
+
+                                MouseArea {
+                                    id: skipArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: rootOverlay.onAction()
+                                }
+                            }
                         }
                     }
-
-                    StyledText {
-                        text: rootOverlay.breakSubtitle()
-                        font.pixelSize: Theme.fontSizeSmall
-                        color: Theme.surfaceVariantText
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
-
-                    StyledText {
-                        text: rootOverlay.currentTip
-                        font.pixelSize: Theme.fontSizeLarge
-                        color: Theme.surfaceVariantText
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: rootOverlay.currentTip !== ""
-                    }
-                }
-
-                MouseArea {
-                    anchors.bottom: parent.bottom
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottomMargin: Theme.spacingXL
-                    width: actionText.width + 40
-                    height: actionText.height + 40
-                    visible: rootOverlay.phase !== "complete"
-                    cursorShape: Qt.PointingHandCursor
-                    hoverEnabled: true
-
-                    onClicked: rootOverlay.onAction()
-
-                    StyledText {
-                        id: actionText
-                        anchors.centerIn: parent
-                        text: rootOverlay.actionLabel()
-                        font.pixelSize: Theme.fontSizeSmall
-                        color: Theme.surfaceVariantText
-                        opacity: parent.containsMouse ? 0.6 : 0.2
-                        Behavior on opacity { NumberAnimation { duration: 150 } }
-                    }
-                }
-
-                DankButton {
-                    anchors.bottom: parent.bottom
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottomMargin: Theme.spacingXL
-                    visible: rootOverlay.phase === "complete"
-                    buttonHeight: 56
-                    horizontalPadding: Theme.spacingXL * 2
-                    iconSize: 28
-                    iconName: "play_arrow"
-                    text: rootOverlay.actionLabel()
-                    backgroundColor: Theme.primary
-                    textColor: Theme.primaryText
-                    onClicked: rootOverlay.onAction()
                 }
             }
 

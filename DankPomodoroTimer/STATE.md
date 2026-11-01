@@ -4,19 +4,19 @@
 
 - Repo: `~/.config/DankMaterialShell/plugins/.repos/39b15ac4661f477a/` (branch `main`)
 - Remote: https://github.com/virtualwolf-369/dms-ketchup
-- Commits: `ebdecf3` (countdown/overlay/pre-warning), `bcf42ee` (statistics dashboard + dms-common), `5d9c474` (fix progress bar staying gray), `45c02ff` (multi-screen countdown, away/lock handling, break-complete button, live stats), `7400424` (slider settings + cycle reset time option), `5cf228b` (cycle reset hour, DND-gated notifications, lock/suspend break flow), `b312036` (code-review cleanup), `c2a9909` (gate lock probe on loginctl signal path), `9c45568` (slow lock probe fallback to 10 s), `18fa5e9` (pause all media players when a break starts), `69c5fc2` (slow lock probe fallback to 30 s), `653bb45` (motivational phrase translations with selectable language)
+- Commits: `ebdecf3` (countdown/overlay/pre-warning), `bcf42ee` (statistics dashboard + dms-common), `5d9c474` (fix progress bar staying gray), `45c02ff` (multi-screen countdown, away/lock handling, break-complete button, live stats), `7400424` (slider settings + cycle reset time option), `5cf228b` (cycle reset hour, DND-gated notifications, lock/suspend break flow), `b312036` (code-review cleanup), `c2a9909` (gate lock probe on loginctl signal path), `9c45568` (slow lock probe fallback to 10 s), `18fa5e9` (pause all media players when a break starts), `69c5fc2` (slow lock probe fallback to 30 s), `653bb45` (motivational phrase translations with selectable language), `51efe61` (preserve the break-modal phase at lock time), `6b7b0f2` (auto-start at shell startup), `befab25` (auto-start on unlock), `d6ba23b` (lock-screen widget, system fonts, modal/popout refresh)
 
 ## Environment
 
 - `dmsKetchup` enabled in `~/.config/DankMaterialShell/plugin_settings.json`
-  - Current values are the user's active test values: `workDuration: "1"`, `shortBreakDuration: "1"` (long break was fixed from a stale `"1,5"` string to `15`)
+  - Current values: `workDuration: 25`, `shortBreakDuration: 5`, `longBreakDuration: 15`, `sessionsPerLongBreak: 4`, `cycleResetHour: 4`, `phraseLanguage: "en"`, both auto-start toggles on, media pause on
 - `dankPomodoroTimer` (Avenge Media v1.1.6, installed first-party at `plugins/DankPomodoroTimer/`) — disabled; reference implementation for multi-screen display
 - `dmsPomodoro` and `pomodoroCopy` also enabled (other pomodoro plugins)
 - dmsKetchup and dankPomodoroTimer share the IPC target `pomodoroTimer` — only one may be enabled at a time
 
 ## Reference paths (running shell)
 
-`/run/user/1000/danklinux-shell/3f15ae07e999b609/` — live shell sources:
+`/run/user/1000/dms-shell/<hash>/` — live DMS 2.0 shell sources:
 
 - `Services/PluginService.qml` — PluginGlobalVar storage (`globalVars[pluginId][varName]`), plugin state cache
 - `Services/SessionService.qml` — lock / suspend signals
@@ -26,7 +26,7 @@
 ## Commands
 
 - QML changes require a shell restart: `dms restart` (plugins do NOT hot-reload)
-- Lint: `qmllint <file>` (v1.0 — old; `DMSKetchupWidget.qml` exits 255 with no message, pre-existing; settings + modal exit 0)
+- Lint: `qmllint <file>` (v1.0 — old; `DMSKetchupWidget.qml` and `DMSKetchupLockWidget.qml` exit 255 with no message (the old linter cannot resolve `qs.Modules.Plugins` / `PluginGlobalVar`); settings + modal exit 0)
 - Logs: `journalctl --user -u '*dms*'`
 - Manual test: `dms ipc call pomodoroTimer startWork`
 
@@ -50,8 +50,15 @@
 - [x] Auto-start work on unlock (`autoStartWorkOnUnlock`, default off, enabled in the user's settings): `handleUnlocked()` starts the next work session when a break finished while locked (catches both the deferred-modal path and the modal-opened-behind-lock-screen default path), and starts a fresh session when none was running (boot/reset); not live-tested — no real lock screen in this environment, verified by inspection (single choke point for all unlock signals)
 - [x] Auto-start work on startup (`autoStartWorkOnStartup`, default off, enabled in the user's settings): a fresh work session starts when the shell boots/logins/`dms restart` with none running; the check is deferred via `Qt.callLater` because the base `PluginComponent` populates `pluginData` only in its own (later) `Component.onCompleted` — the first inline version silently never fired; verified live in the journal ("auto-starting work session at startup", exactly once despite the double bar-instance load)
 - [x] Lock-time modal phase preservation: `onSessionLocked` and the probe path deferred every open break modal as "running" — a break that had already finished (modal showing "Continue working") re-opened as a 0:00 running overlay with only Skip after unlock. Now the actual phase is preserved at lock, and `handleUnlocked()` upgrades a stale "running" phase when the modal re-opened as "complete" behind the lock screen; with `autoStartWorkOnUnlock` on, unlock then goes straight to the next work session. Verified by inspection (no real lock screen here)
+- [x] DMS 2.0 pill buttons: the popout quick actions stay on one row with intrinsic widths instead of three equal columns; `horizontalPadding: Theme.spacingS` leaves enough room for the full "Short break" / "Long break" labels. Verified by rendering DButton at the live 368 px popout content width with the JetBrains Mono theme font: the labels no longer touch the pill edges and the row still fits with a small margin.
 - [x] Phrase translations: 11 tips in 18 languages under `translations/<lang>.json`; `phraseLanguage` setting (default `system`, candidate chain full locale → hyphen variant → language → en); modal picks a random phrase and hides the line when empty; verified system fallback (de_AT → de.json) and explicit selection (ja.json)
 - [x] Sessions-per-long-break slider (`sessionsPerLongBreak`, 1–10, default 4) replacing the hardcoded `% 4` in the completion path, `cycleBreakIsLong()` and the popout "Next long break after N more" text; About card now shows live values instead of hardcoded numbers; fixed stale `"longBreakDuration": "1,5"` in plugin_settings.json (slider can't represent comma decimals — it was running 1.5 min long breaks while the UI implied 15)
+- [x] Typography: bar pill explicitly uses the DMS system font (`Theme.fontFamily`, `Theme.fontWeightMedium`); the break-modal quote and all big countdowns (modal, popout, lock widget) use the fontconfig system monospace (`font.family: "monospace"`; `qs.Common` does not export `Fonts.systemMono`)
+- [x] Visual refresh (simple/modern): break modal is now a centered card with a tinted state badge, state-colored 96 px countdown, progress track, primary continue button, subtle skip pill and a soft gradient; popout got a rounded-cap ring, filled primary play/pause and tonal reset buttons
+- [x] Lock-screen widget (`DMSKetchupLockWidget.qml`, new `desktop` surface): READY/FOCUS/PAUSED/BREAK state, monospace countdown, progress bar, "Session N of M" and session length; reads the bar widget's globals instead of running its own timer. Verified live on both monitors via `dms ipc call lock lock` (PAUSED/24:51, READY/25:00, Session 1 of 4); instance + position stored in `settings.json` / `session.json`
+- [x] Manifest/registry: `plugin.json` 1.3.0 keeps the legacy `"component"` and adds `"components": { "widget", "desktop" }`; `qmldir` lists the new component (DMS 2.0 `_resolveComponentPaths` prefers `components`)
+- [x] Fixed the quote never appearing: `Proc.runCommand` keys callbacks by id, so both bar instances shared `dmsKetchup.readPhrases` and only one received the table. The id is now per-instance and the modal re-picks on open — verified live (monospace tip renders under the subtitle)
+- [x] Replaced the non-existent DMS 2.0 token `Theme.fontSizeExtraLarge` (was logging "Unable to assign double to int" at the modal title); all other Theme tokens used by the plugin were checked against the live `Theme.qml`
 
 ## Known limitations / to verify later
 

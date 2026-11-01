@@ -30,6 +30,7 @@
 - No `Theme.errorContainer` — use `Theme.withAlpha(Theme.error, 0.15)`
 - `DankButton` supports `iconName` and `buttonHeight`
 - `DankIcon` uses `name` / `size` / `color`
+- DMS 2.0 `DankButton` is a shim for `DButton`: its radius is a pill (`height / 2`) and its content row is icon + 8 px gap + label + `horizontalPadding` (16 px at the default 40 px height). Buttons that sit in a fixed-width row need enough room for that. The quick actions use intrinsic widths and `horizontalPadding: Theme.spacingS` so the full labels fit on one line at the 400 px popout width; the user's `JetBrainsMono Nerd Font` theme font is much wider than the default, which is what made the old 3-equal-column row overflow.
 
 ## IPC (IpcHandler)
 
