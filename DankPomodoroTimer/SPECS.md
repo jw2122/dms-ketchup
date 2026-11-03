@@ -44,11 +44,14 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 ## Lock-screen / desktop widget
 
-- `DMSKetchupLockWidget.qml` extends `DesktopPluginComponent` and renders a glass-style card: state dot + label (READY / FOCUS / PAUSED / BREAK COMPLETE / SHORT|LONG BREAK), large monospace countdown, progress bar, "Session N of M" footer and the session length.
+- `DMSKetchupLockWidget.qml` extends `DesktopPluginComponent` and renders a glass-style card: state dot + label (READY / FOCUS / PAUSED / BREAK COMPLETE / SHORT|LONG BREAK), large monospace countdown, progress bar, "Session N of M" footer, session length and a two-button control row. Default/minimum size is 340×180 / 240×140.
 - It owns no timer: it reads the bar widget's shared `PluginGlobalVar`s (`remainingSeconds`, `totalSeconds`, `isRunning`, `timerState`, `completedPomodoros`, `timerDisplayActive`), so the lock screen always mirrors the live session.
+- Controls call the bar widget's IPC target (`lockStart`, `lockPause`, `lockResume`, `lockContinue`) through `Quickshell.execDetached(["dms", "ipc", "call", "pomodoroTimer", ...])`, so there is still exactly one engine and one session owner. The primary 34 px circle is play/pause/start/continue in `Theme.primary` with `Theme.primaryText`; the tonal 34 px circle skips a running break.
+- Button mapping: READY → start a running work session; work running → pause (= "as if the screen had just locked", see Away); work paused → resume and drop the away snapshot; break running → pause/resume the break; break running + skip → jump to the next work session; break complete → continue (clear the deferred modal, start work).
+- The row is inert in the widget editor / lock-screen demo (`lockHost.demoMode`), so previews cannot drive the timer.
 - On the lock screen it uses `lockHost.contentColor(...)`, `SettingsData.lockScreenFontFamily` for labels, and `Theme.readableSurface` / `Theme.outlineMedium` for the card; on the desktop it uses `Theme.surfaceText` and `Theme.fontFamily`.
 - Idle state (no session) shows the configured work duration and "No session running"; session numbering starts at 1 and wraps to `sessionsPerLongBreak` after a full cycle.
-- The user instance lives in `settings.json` → `lockScreenWidgetInstances` (`widgetType: "dmsKetchup"`); its position is stored in `session.json` → `desktopWidgetInstancePositions.lock_ketchup` (`_synced`, top-right).
+- The user instance lives in `settings.json` → `lockScreenWidgetInstances` (`widgetType: "dmsKetchup"`); its position is stored in `session.json` → `desktopWidgetInstancePositions.lock_ketchup` (`_synced`, top-right, 340×180).
 
 ## Session flow
 
@@ -63,7 +66,8 @@ All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals,
 
 - Break finished while the screen was locked (deferred `"complete"` modal, or the modal opened behind the lock screen in the default loginctl-signal config) -> next work session starts immediately (respects `autoStartPomodoros`), no modal
 - Break still counting down while locked -> modal re-opens as before (a live break is not cut short)
-- Work session was running -> away logic restores/resumes it as before
+- Work session was **running** (e.g. resumed from the lock screen) -> it simply keeps running; the stale away snapshot is discarded (`cancelAway()`), so no reset/repeat happens
+- Work session was **paused** -> today's away restore/repeat/reset logic applies unchanged
 - No session running at all (fresh boot, or after Reset) -> a fresh work session starts — "whenever I want to use the device"
 
 ## Startup behavior (`autoStartWorkOnStartup`, default off)
@@ -104,7 +108,11 @@ All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals,
 
 ## IPC
 
-Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBreak`, `startLongBreak`.
+Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBreak`, `startLongBreak`, plus the lock-widget actions `lockStart`, `lockPause`, `lockResume`, `lockContinue`.
+
+- `lockPause` pauses a work session that has no away snapshot yet and, when the session is locked, starts a fresh away snapshot first (same effect as locking at that moment). Breaks are only paused.
+- `lockResume` cancels the away snapshot and (re)starts the countdown.
+- `lockContinue` clears `deferredBreakModalPhase` / `breakModalArmed`, closes the break modal and starts a running work session, so unlocking afterwards cannot handle the break-complete state twice.
 
 ## Persistence
 
@@ -117,9 +125,10 @@ Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBre
 
 Departure (screen lock or lid close):
 
-- **Work session**: timer pauses, state snapshotted
+- **Work session**: timer pauses, state snapshotted (cause `lock`)
 - **Break + screen lock**: nothing — breaks keep running while the machine stays on; a break completing while locked defers its modal to unlock
 - **Break + suspend**: the break's remaining time is snapshotted — breaks are not paused, the away time counts against them
+- **Pause from the lock screen**: treated as locking *again* at that moment — a fresh snapshot with a fresh timestamp replaces the old one (if no away snapshot exists yet, one is created)
 
 Return:
 
@@ -134,6 +143,8 @@ Return:
 - Screen unlock / resume consumes the deferred break modal (the old `deferredBreakModalPhase` was written but never read — fixed)
 - The deferred phase is **preserved** at lock time: a "complete" modal (break finished, waiting for continue) stays "complete" — it used to be hardcoded to "running", which re-opened a 0:00 running overlay with a Skip button instead of the continue screen. `handleUnlocked()` also upgrades a stale "running" phase to "complete" when the modal already re-opened as "complete" behind the lock screen.
 - Detection: `SessionService` push signals (`preparingForSleep` → suspend; `sessionLocked` / `sessionUnlocked` / `sessionResumed`, driven by loginctl and on by default via `loginctlLockIntegration`) are the primary path. The 30 s `dms ipc call lock isLocked` probe runs only as a fallback when that integration is disabled, and only while a session is active (`timerDisplayActive`) — zero polling in the default configuration. Lid close while locked upgrades the cause to suspend.
+- Away bookkeeping (`awayActive`, `awayStartMs`, `awaySnapshot`, `awayCause`) lives in shared `PluginGlobalVar`s, because both bar instances receive the lock/unlock signals. The first one to act wins and the other becomes a no-op, so a lock/unlock pair is applied exactly once.
+- While `sessionLocked`, the pre-warning toast and desktop notifications are suppressed (they would land on the lock layer); sounds still play so an off-screen session/break change remains audible.
 
 ## Settings
 

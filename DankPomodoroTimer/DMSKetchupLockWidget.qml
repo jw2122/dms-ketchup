@@ -1,25 +1,33 @@
 import QtQuick
+import Quickshell
 import qs.Common
 import qs.Services
 import qs.Widgets
 import qs.Modules.Plugins
 
 // Desktop widget surface, used on the DMS 2.0 lock screen and on the desktop.
-// Reads the same plugin globals as the bar widget, so it needs no own timer.
+// Reads the same plugin globals as the bar widget and drives it through the
+// plugin IPC, so there is still exactly one timer engine.
 DesktopPluginComponent {
     id: root
 
     property var lockHost: null
     property var screen: null
 
-    minWidth: 220
-    minHeight: 110
+    minWidth: 240
+    minHeight: 140
     property real defaultWidth: 340
-    property real defaultHeight: 160
+    property real defaultHeight: 180
 
     readonly property var cfg: instanceData?.config ?? ({})
     readonly property bool active: globalTimerDisplayActive.value
     readonly property bool onLockScreen: lockScreen
+    readonly property bool breakComplete: active
+        && globalTimerState.value !== "work"
+        && globalRemainingSeconds.value <= 0
+
+    // Widget editor / lock-screen demo: render, but never touch the timer.
+    readonly property bool interactive: !(onLockScreen && (lockHost?.demoMode ?? false))
 
     readonly property color contentColor: onLockScreen
         ? (lockHost?.contentColor(cfg.colorMode ?? "default", cfg.customColor ?? "#ffffff") ?? Theme.lockScreenContentColor)
@@ -28,6 +36,8 @@ DesktopPluginComponent {
     readonly property color accent: {
         if (!active)
             return contentColor;
+        if (breakComplete)
+            return Theme.success;
         if (globalTimerState.value === "longBreak")
             return Theme.warning;
         if (globalTimerState.value === "shortBreak")
@@ -75,10 +85,12 @@ DesktopPluginComponent {
     function stateLabel() {
         if (!active)
             return tr("Ready", "Listo");
-        if (globalTimerState.value === "work")
-            return globalIsRunning.value ? tr("Focus", "Enfoque") : tr("Paused", "Pausado");
-        if (globalRemainingSeconds.value <= 0)
+        if (breakComplete)
             return tr("Break complete", "Descanso completado");
+        if (!globalIsRunning.value)
+            return tr("Paused", "Pausado");
+        if (globalTimerState.value === "work")
+            return tr("Focus", "Enfoque");
         return globalTimerState.value === "longBreak"
             ? tr("Long break", "Descanso largo")
             : tr("Short break", "Descanso corto");
@@ -102,6 +114,39 @@ DesktopPluginComponent {
 
     function minutesLabel() {
         return Math.round(totalSeconds / 60) + " " + tr("min", "min");
+    }
+
+    // ── Session controls ──────────────────────────────────────────────
+    function primaryAction() {
+        if (!active)
+            return "lockStart";
+        if (breakComplete)
+            return "lockContinue";
+        return globalIsRunning.value ? "lockPause" : "lockResume";
+    }
+
+    function primaryIcon() {
+        if (!active || breakComplete)
+            return "play_arrow";
+        return globalIsRunning.value ? "pause" : "play_arrow";
+    }
+
+    function primaryLabel() {
+        if (!active)
+            return tr("Start session", "Iniciar sesión");
+        if (breakComplete)
+            return tr("Continue working", "Seguir trabajando");
+        return globalIsRunning.value ? tr("Pause", "Pausar") : tr("Resume", "Reanudar");
+    }
+
+    function canSkip() {
+        return active && !breakComplete && globalTimerState.value !== "work";
+    }
+
+    function sendAction(action) {
+        if (!interactive)
+            return;
+        Quickshell.execDetached(["dms", "ipc", "call", "pomodoroTimer", action]);
     }
 
     PluginGlobalVar {
@@ -216,14 +261,79 @@ DesktopPluginComponent {
             }
         }
 
-        StyledText {
+        Row {
             width: parent.width
-            text: root.detailText()
-            font.family: root.labelFont
-            font.pixelSize: Theme.fontSizeSmall
-            color: root.contentColor
-            opacity: 0.55
-            elide: Text.ElideRight
+            spacing: Theme.spacingS
+
+            StyledText {
+                width: parent.width - controlsRow.width - parent.spacing
+                text: root.detailText()
+                font.family: root.labelFont
+                font.pixelSize: Theme.fontSizeSmall
+                color: root.contentColor
+                opacity: 0.55
+                elide: Text.ElideRight
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Row {
+                id: controlsRow
+                spacing: Theme.spacingS
+                anchors.verticalCenter: parent.verticalCenter
+
+                // Skip break (only while a break is actually counting down)
+                Rectangle {
+                    width: visible ? 34 : 0
+                    height: 34
+                    radius: 17
+                    visible: root.canSkip()
+                    color: Theme.withAlpha(root.contentColor, skipArea.containsMouse ? 0.24 : 0.12)
+                    opacity: root.interactive ? 1 : 0.4
+
+                    DankIcon {
+                        anchors.centerIn: parent
+                        name: "skip_next"
+                        size: 18
+                        color: root.contentColor
+                    }
+
+                    MouseArea {
+                        id: skipArea
+                        anchors.fill: parent
+                        enabled: root.interactive
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        Accessible.name: root.tr("Skip break", "Omitir descanso")
+                        onClicked: root.sendAction("lockContinue")
+                    }
+                }
+
+                // Play / pause / start / continue
+                Rectangle {
+                    width: 34
+                    height: 34
+                    radius: 17
+                    color: Theme.primary
+                    opacity: root.interactive ? (primaryArea.containsMouse ? 0.85 : 1) : 0.4
+
+                    DankIcon {
+                        anchors.centerIn: parent
+                        name: root.primaryIcon()
+                        size: 18
+                        color: Theme.primaryText
+                    }
+
+                    MouseArea {
+                        id: primaryArea
+                        anchors.fill: parent
+                        enabled: root.interactive
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        Accessible.name: root.primaryLabel()
+                        onClicked: root.sendAction(root.primaryAction())
+                    }
+                }
+            }
         }
     }
 }

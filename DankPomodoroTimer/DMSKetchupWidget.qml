@@ -81,10 +81,6 @@ PluginComponent {
     property bool breakModalArmed: false
     property int bootModalSuppressUntil: 0
     property string deferredBreakModalPhase: ""
-    property bool awayActive: false
-    property int awayStartMs: 0
-    property var awaySnapshot: null
-    property string awayCause: "lock"
 
     onPluginServiceChanged: {
         if (pluginService) {
@@ -94,9 +90,6 @@ PluginComponent {
             breakModalArmed = false;
             bootModalSuppressUntil = Date.now() + 20000;
             deferredBreakModalPhase = "";
-            awayActive = false;
-            awayStartMs = 0;
-            awaySnapshot = null;
             Qt.callLater(loadPhrases);
             currentDateKey = formatDateKey(new Date());
             let savedCounter = pluginService.loadPluginState(statePluginId, "cycleCounter", -1);
@@ -202,6 +195,7 @@ PluginComponent {
                 beginAway("suspend");
         }
         function onSessionLocked() {
+            root.sessionLocked = true;
             if (root.breakModalOpen) {
                 root.closeBreakModal();
                 root.deferredBreakModalPhase = root.breakModalPhase;
@@ -359,6 +353,32 @@ PluginComponent {
         defaultValue: false
     }
 
+    // Away bookkeeping is shared: both bar instances receive the lock/unlock
+    // signals, so the first one to act wins and the other becomes a no-op.
+    PluginGlobalVar {
+        id: globalAwayActive
+        varName: "awayActive"
+        defaultValue: false
+    }
+
+    PluginGlobalVar {
+        id: globalAwayStartMs
+        varName: "awayStartMs"
+        defaultValue: 0
+    }
+
+    PluginGlobalVar {
+        id: globalAwaySnapshot
+        varName: "awaySnapshot"
+        defaultValue: null
+    }
+
+    PluginGlobalVar {
+        id: globalAwayCause
+        varName: "awayCause"
+        defaultValue: "lock"
+    }
+
     PluginGlobalVar {
         id: globalShowSecondsOnly
         varName: "showSecondsOnly"
@@ -418,7 +438,9 @@ PluginComponent {
             ? root.tr("DMS Ketchup", "DMS Ketchup")
             : root.tr("DMS Ketchup Complete", "DMS Ketchup completo");
         const notifBody = root.tr("Time for a " + (isLongBreak ? "long" : "short") + " break!", "¡Es hora de un descanso " + (isLongBreak ? "largo" : "corto") + "!");
-        if (!SessionData.doNotDisturb) {
+        // No desktop notification over the lock screen: the lock widget
+        // shows the state and the sound still plays.
+        if (!SessionData.doNotDisturb && !root.sessionLocked) {
             Quickshell.execDetached(["sh", "-c", "notify-send '" + notifTitle.replace(/'/g, "'\''") + "' '" + notifBody.replace(/'/g, "'\''") + "' -u normal"]);
         }
         root.playTimerSound("end");
@@ -449,7 +471,9 @@ PluginComponent {
     }
 
     function finishBreak() {
-        if (!SessionData.doNotDisturb) {
+        // No desktop notification over the lock screen: the lock widget
+        // shows the state and the sound still plays.
+        if (!SessionData.doNotDisturb && !root.sessionLocked) {
             Quickshell.execDetached(["sh", "-c", "notify-send '" + root.tr("Break Complete", "Descanso completo").replace(/'/g, "'\''") + "' '" + root.tr("Ready for another pomodoro?", "¿Listo para otro ciclo?").replace(/'/g, "'\''") + "' -u normal"]);
         }
         root.playTimerSound("end");
@@ -529,6 +553,10 @@ PluginComponent {
     function showPreWarning() {
         if (root.isPreWarning || !root.enablePreWarning)
             return;
+        // Off-screen sessions keep running behind the lock screen; an OSD
+        // there would land on top of the lock layer.
+        if (root.sessionLocked)
+            return;
         root.isPreWarning = true;
         if (root.preWarningWindow) {
             root.preWarningWindow.destroy();
@@ -572,51 +600,67 @@ PluginComponent {
     }
 
     function beginAway(cause) {
-        if (awayActive) {
-            if (cause === "suspend")
-                awayCause = "suspend";
+        if (globalAwayActive.value) {
+            if (cause === "suspend" && globalAwayCause.value !== "suspend")
+                globalAwayCause.set("suspend");
             return;
         }
         const state = globalTimerState.value;
         if (state === "work") {
-            awaySnapshot = {
+            const snapshot = {
                 kind: "work",
                 remaining: globalRemainingSeconds.value,
                 total: globalTotalSeconds.value,
                 wasRunning: globalIsRunning.value
             };
-            awayActive = true;
-            awayStartMs = Date.now();
-            awayCause = cause;
+            globalAwaySnapshot.set(snapshot);
+            globalAwayActive.set(true);
+            globalAwayStartMs.set(Date.now());
+            globalAwayCause.set(cause);
             globalIsRunning.set(false);
             root.closePreWarning();
-            console.info("[dms-ketchup] beginAway", "cause=", cause, "remaining=", awaySnapshot.remaining, "total=", awaySnapshot.total, "wasRunning=", awaySnapshot.wasRunning);
+            console.info("[dms-ketchup] beginAway", "cause=", cause, "remaining=", snapshot.remaining, "total=", snapshot.total, "wasRunning=", snapshot.wasRunning);
         } else if ((state === "shortBreak" || state === "longBreak") && cause === "suspend") {
-            awaySnapshot = {
+            const snapshot = {
                 kind: "break",
                 remaining: globalRemainingSeconds.value,
                 total: globalTotalSeconds.value,
                 wasRunning: globalIsRunning.value
             };
-            awayActive = true;
-            awayStartMs = Date.now();
-            awayCause = cause;
+            globalAwaySnapshot.set(snapshot);
+            globalAwayActive.set(true);
+            globalAwayStartMs.set(Date.now());
+            globalAwayCause.set(cause);
             globalIsRunning.set(false);
             root.closePreWarning();
-            console.info("[dms-ketchup] beginAway", "cause=", cause, "break=", state, "remaining=", awaySnapshot.remaining);
+            console.info("[dms-ketchup] beginAway", "cause=", cause, "break=", state, "remaining=", snapshot.remaining);
         }
     }
 
     function endAway() {
-        if (!awayActive)
+        if (!globalAwayActive.value)
             return;
-        const awayMs = Date.now() - awayStartMs;
-        const snapshot = awaySnapshot;
-        awayActive = false;
-        awayStartMs = 0;
-        awaySnapshot = null;
-        console.info("[dms-ketchup] endAway", "awayMs=", awayMs, "cause=", awayCause);
+        const awayMs = Date.now() - globalAwayStartMs.value;
+        const snapshot = globalAwaySnapshot.value;
+        const cause = globalAwayCause.value;
+        globalAwayActive.set(false);
+        globalAwayStartMs.set(0);
+        globalAwaySnapshot.set(null);
+        globalAwayCause.set("lock");
+        console.info("[dms-ketchup] endAway", "awayMs=", awayMs, "cause=", cause);
         applyAwayLogic(awayMs, snapshot);
+    }
+
+    // The user took over from the lock screen — the pending away bookkeeping is
+    // stale and must not reset/repeat the session on unlock.
+    function cancelAway() {
+        if (!globalAwayActive.value)
+            return;
+        globalAwayActive.set(false);
+        globalAwayStartMs.set(0);
+        globalAwaySnapshot.set(null);
+        globalAwayCause.set("lock");
+        console.info("[dms-ketchup] cancelAway");
     }
 
     function applyAwayLogic(awayMs, snapshot) {
@@ -680,7 +724,13 @@ PluginComponent {
 
     function handleUnlocked() {
         sessionLocked = false;
-        endAway();
+        // Only apply the away reset/repeat logic when the session is still
+        // paused. A session that was resumed from the lock screen is a
+        // deliberate "I'm working" signal, so it simply continues.
+        if (globalIsRunning.value)
+            root.cancelAway();
+        else
+            endAway();
         // A break that finished while the screen was locked either deferred its
         // modal (probe/startup path) or opened it directly behind the lock
         // screen (default loginctl-signal path) — catch both.
@@ -712,6 +762,44 @@ PluginComponent {
         if (pluginService) {
             pluginService.savePluginState(statePluginId, "cycleCounter", 0);
         }
+    }
+
+    // ── Lock-screen controls ──────────────────────────────────────────
+    // The lock widget has no engine of its own: it drives the timer through
+    // these IPC functions, so there is still exactly one session owner.
+    function lockStart() {
+        root.cancelAway();
+        root.deferredBreakModalPhase = "";
+        root.breakModalArmed = false;
+        root.startWork(true, true);
+    }
+
+    function lockResume() {
+        root.cancelAway();
+        if (!globalIsRunning.value)
+            root.toggleTimer();
+    }
+
+    function lockPause() {
+        if (!globalIsRunning.value)
+            return;
+        if ((root.sessionLocked || SessionService.locked) && !globalAwayActive.value && globalTimerState.value === "work") {
+            // "As if I locked the screen now": snapshot + pause from this point
+            root.beginAway("lock");
+            return;
+        }
+        globalIsRunning.set(false);
+        root.closePreWarning();
+    }
+
+    function lockContinue() {
+        // Same session outcome as unlocking after a finished break: clear the
+        // deferred modal so unlocking later does not handle it twice.
+        root.cancelAway();
+        root.deferredBreakModalPhase = "";
+        root.breakModalArmed = false;
+        root.closeBreakModal();
+        root.startWork(true, true);
     }
 
     // ── Motivational phrases ──────────────────────────────────────────
@@ -869,7 +957,7 @@ PluginComponent {
         if (!globalIsRunning.value) {
             globalTimerOwnerId.set(root.instanceId);
             globalTimerDisplayActive.set(true);
-            if (root.fullscreenBreakModalEnabled && globalTimerState.value !== "work") {
+            if (root.fullscreenBreakModalEnabled && globalTimerState.value !== "work" && !root.sessionLocked) {
                 root.openBreakModal("running");
             }
         }
@@ -957,6 +1045,27 @@ PluginComponent {
         function startLongBreak(): string {
             root.startLongBreak(true, false, true);
             return "POMODORO_LONG_BREAK_STARTED";
+        }
+
+        // Lock-screen widget actions (see DMSKetchupLockWidget.qml)
+        function lockStart(): string {
+            root.lockStart();
+            return "LOCK_WORK_STARTED";
+        }
+
+        function lockPause(): string {
+            root.lockPause();
+            return globalIsRunning.value ? "LOCK_PAUSE_IGNORED" : "LOCK_TIMER_PAUSED";
+        }
+
+        function lockResume(): string {
+            root.lockResume();
+            return globalIsRunning.value ? "LOCK_TIMER_RESUMED" : "LOCK_RESUME_IGNORED";
+        }
+
+        function lockContinue(): string {
+            root.lockContinue();
+            return "LOCK_WORK_CONTINUED";
         }
 
         target: "pomodoroTimer"
