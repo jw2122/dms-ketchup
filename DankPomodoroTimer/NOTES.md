@@ -21,9 +21,24 @@
 
 ## SessionService (lock / suspend)
 
-- Signals (`sessionLocked`, `sessionUnlocked`, `sessionResumed`) and `preparingForSleep` only work when `SettingsData.loginctlLockIntegration` is enabled and loginctl is available — always pair with the 1 s `dms ipc call lock isLocked` probe as fallback
+- Signals (`sessionLocked`, `sessionUnlocked`, `sessionResumed`) and `preparingForSleep` only work when `SettingsData.loginctlLockIntegration` is enabled and loginctl is available — always pair with the 30 s `dms ipc call lock isLocked` probe as fallback (only while `timerDisplayActive`)
+- `onSessionLocked` must also set the local `sessionLocked` mirror immediately: the probe can lag by up to 30 s, and the lock-control pause path and the notification/pre-warning gates depend on it. Also use `SessionService.locked` as a fallback in the pause guard for the first click after locking.
 - `sessionResumed` is deduplicated (1 s window); on wake with lock-before-suspend, wait for `sessionUnlocked` instead (check `SessionService.locked && SettingsData.lockBeforeSuspend`)
 - Wall-clock time (`Date.now()`) keeps running during suspend, so it measures the full away duration
+
+## Away state and lock controls
+
+- Both bar instances receive every lock/unlock signal, so per-instance away properties caused double `beginAway` and double reset/repeat. Away bookkeeping lives in shared `PluginGlobalVar`s (`awayActive`, `awayStartMs`, `awaySnapshot`, `awayCause`); the first instance to act wins and the second no-ops.
+- `PluginService.setGlobalVar` updates `globalVars` synchronously, so the check-and-set inside `beginAway`/`endAway` is race-free within one signal dispatch. Snapshots are plain JS objects — fine as `var`.
+- Unlock rule: `handleUnlocked()` cancels the snapshot when `isRunning` is true and runs `endAway()` only when the session is still paused. A session resumed from the lock screen therefore continues untouched.
+- `lockPause` is "lock now": when locked, in a work session and no away is pending it calls `beginAway("lock")` (fresh timestamp). Otherwise it just pauses (breaks included).
+- `lockContinue` (also used for skip) clears `deferredBreakModalPhase` / `breakModalArmed`, closes the modal and starts a **running** work session — the same outcome as the modal's Continue button, without a second start on unlock.
+- Do not open the fullscreen break modal from `toggleTimer` while locked (`!root.sessionLocked`): it would cover the lock screen when resuming a paused break.
+- The lock widget drives all of this with `Quickshell.execDetached(["dms", "ipc", "call", "pomodoroTimer", action])`; buttons are disabled (opacity 0.4) in the editor/demo via `lockHost.demoMode`.
+
+## Hyprland lock gotcha
+
+- Never restart the `dms` service while the session is locked during testing. The dying `ext-session-lock` client leaves Hyprland's lock state poisoned; every later `dms ipc call lock lock` then kills the UI with `wl_display#1: error 0: invalid object N` / "Wayland connection experienced a fatal error" until the compositor session is restarted. It reproduces with the previous commit and with the lock widget removed, so it is a compositor/quickshell bug, not this plugin.
 
 ## Theme / styling
 
