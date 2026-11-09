@@ -115,14 +115,27 @@ Item {
 
             color: Theme.surface
 
+            // Soft tint over the whole surface. This must not live inside
+            // safeArea: the bar/dock offsets would start the gradient 40 px
+            // from the edge and leave a visible strip on the left.
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.withAlpha(rootOverlay.stateColor(), 0.10) }
+                    GradientStop { position: 0.55; color: "transparent" }
+                }
+            }
+
             Item {
                 id: safeArea
                 property int _refreshTrigger: 0
                 anchors.fill: parent
                 anchors.topMargin: { safeArea._refreshTrigger; return getOffset("top"); }
                 anchors.bottomMargin: { safeArea._refreshTrigger; return getOffset("bottom"); }
-                anchors.leftMargin: { safeArea._refreshTrigger; return getOffset("left"); }
-                anchors.rightMargin: { safeArea._refreshTrigger; return getOffset("right"); }
+                // Use the same inset on both sides so a left/right bar cannot
+                // push the centered card off the middle of the screen.
+                anchors.leftMargin: { safeArea._refreshTrigger; return Math.max(getOffset("left"), getOffset("right")); }
+                anchors.rightMargin: { safeArea._refreshTrigger; return Math.max(getOffset("left"), getOffset("right")); }
                 focus: true
 
                     Keys.onEscapePressed: (event) => {
@@ -143,15 +156,6 @@ Item {
                             event.accepted = true;
                         }
                     }
-
-                // Soft tint so the overlay doesn't read as a flat void
-                Rectangle {
-                    anchors.fill: parent
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.withAlpha(rootOverlay.stateColor(), 0.10) }
-                        GradientStop { position: 0.55; color: "transparent" }
-                    }
-                }
 
                 StyledRect {
                     id: breakCard
