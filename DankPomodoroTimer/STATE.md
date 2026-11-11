@@ -10,7 +10,7 @@
 
 - `dmsKetchup` enabled in `~/.config/DankMaterialShell/plugin_settings.json`
   - Current values: `workDuration: 25`, `shortBreakDuration: 5`, `longBreakDuration: 15`, `sessionsPerLongBreak: 4`, `cycleResetHour: 4`, `phraseLanguage: "en"`, both auto-start toggles on, media pause on
-  - Plugin version: 1.4.0
+  - Plugin version: 1.4.1
 - `dankPomodoroTimer` (Avenge Media v1.1.6, installed first-party at `plugins/DankPomodoroTimer/`) — disabled; reference implementation for multi-screen display
 - `dmsPomodoro` and `pomodoroCopy` also enabled (other pomodoro plugins)
 - dmsKetchup and dankPomodoroTimer share the IPC target `pomodoroTimer` — only one may be enabled at a time
@@ -30,6 +30,30 @@
 - Lint: `qmllint <file>` (v1.0 — old; `DMSKetchupWidget.qml` and `DMSKetchupLockWidget.qml` exit 255 with no message (the old linter cannot resolve `qs.Modules.Plugins` / `PluginGlobalVar`); settings + modal exit 0)
 - Logs: `journalctl --user -u '*dms*'`
 - Manual test: `dms ipc call pomodoroTimer startWork`
+
+## Review & stabilization pass (2026-11-10, v1.4.1)
+
+Everything below was implemented and verified live in this working tree (uncommitted):
+
+- [x] **Break modal rendered nothing**: `Repeater` was used for `PanelWindow` delegates ("Delegate must be of Item type"); replaced with Quickshell `Variants`. Verified on eDP-1: card, icon, countdown, progress, phrase, pills.
+- [x] **Lock-time phase loss**: both lock paths captured `breakModalPhase` *after* `closeBreakModal()` (always `"hidden"`). Phase is now captured before closing.
+- [x] **Startup suppression was a time window that dropped the open**: single-shot 20 s `bootGuardTimer` + `armStartupSuppression()` / `endStartupSuppression()`; a deferred modal is opened after boot instead of being dropped.
+- [x] **Lock probe overrode `running`**: `lockStateProbeTimer.restart()` calls removed; the probe is bound to `timerDisplayActive && !SettingsData.loginctlLockIntegration`, 30 s, one-shot at a time.
+- [x] **Double unlock handling**: shared `unlockHandledAt` stamp (2 s window) stops the second bar instance from re-opening the modal / starting work twice.
+- [x] **Break refactor**: `startShortBreak` / `startLongBreak` delegate to one `startBreak(kind, autoStart, openModal, playSoundNow)`; the modal opens only in fullscreen mode; `startCycleBreak` no longer duplicates the decision.
+- [x] **Break overlay pause/resume**: "Pause break" / "Resume break" pill + `Space` key; resuming re-pauses media that started during the pause. README already claimed pause support; `toggleBreakPause()` was unused.
+- [x] **Pre-warning toast**: cached component; toast closes on pause/toggle; countdown refreshed on creation; fixed invalid `Quickshell.primaryScreen` (now `screens[0]`) and `implicitWidth/Height`; shared `BarInsets.js` offsets.
+- [x] **Sound/notification cost**: player resolved once (`pw-play` → `paplay` → `aplay` → `ffplay` → `play`); pending first chime; `notify-send -u normal <title> <body>` as direct argv (no shell, no quoting).
+- [x] **Multi-instance safety**: `initAt` stamp + `initializationOwner`; duration-change handlers only re-base when the instance owns the session. Fixed second-instance reset that left a paused timer after auto-start.
+- [x] **Settings**: single 365-day stats pass (top-5 contributors), 150 ms debounced refresh, `clearPluginState` reset with fallback loop, capped init retries, removed unused import; removed the `onPluginServiceChanged` override that shadowed `PluginSettings`' value reload (toggles showed defaults because of it).
+- [x] **About card said "undefined minutes"**: it read non-existent `PluginSettings.workDuration` / `…BreakDuration` properties. It now reads the live slider values (`workSlider.value`, …) and updates as the sliders move. Verified live (25 / 5 / 15 / 4).
+- [x] **`autoStartWorkOnUnlock` now really starts work**: a work session paused before locking stayed paused after unlock. `handleUnlocked()` now resumes it (remaining time kept) when the toggle is on, in addition to the existing break-finished and no-session paths. Verified live: pause → lock 6 s → unlock → `running:true`.
+- [x] **Removed dead code / log spam**: `cleanupOldData`, `pauseCurrentTimer`, redundant today-only branch, debug `console.log`s.
+- [x] **`status()` IPC** added (JSON: state, remaining, total, displayActive, completed, modal phase, lock/deferred state); fixed `POMDORO` typo.
+- [x] **Lock widget** reads reactive `pluginData` for `workDuration` / `sessionsPerLongBreak`.
+- [x] Live verification: modal on eDP-1 with pause/resume (`running:false/true`, label switch) and skip (work session started); pre-warning at 10 s with Snooze (+300 s) and Skip (break start); lock/unlock during a break re-opens the modal, break continues, one `handleUnlocked`, no duplicate starts; settings page renders with stored values; auto-start work 25 min after a clean restart.
+- [x] Lint: Qt6 `qmllint` (no parse errors), `BarInsets.js` passes `node --check`.
+- [x] Test durations temporarily set to 1 min, then restored to 25/5; temporary no-accessibility systemd drop-in removed and `dms` restarted cleanly.
 
 ## Done in this session
 
@@ -71,3 +95,5 @@
 - The pre-warning toast still shows only on the primary screen (by design)
 - DND gating verified by inspection (live `SessionData.doNotDisturb` property read at send time); toggle DND during a session to observe it end-to-end
 - Old string duration values (e.g. `"1,5"`) still drive the timer, but the sliders show a coerced value until moved once
+- Cosmetic, pre-existing in `dms-common/SliderSettingPlus.qml` (not modified): in the narrow plugin settings panel the long labels elide to "Wor… / Sho… / Lon…". The value and slider work; widening the panel or shortening the labels fixes it
+- Statistics dashboard verified live after the single-pass rewrite (Today 0 / This Week 16 / Total 101 / Best Day 13, top-5 list, Refresh + Reset Stats). The same check found the About card printing "undefined minutes"; fixed by reading the live slider values (pre-existing bug).

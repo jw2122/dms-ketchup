@@ -5,7 +5,6 @@ import qs.Common
 import qs.Services
 import qs.Widgets
 import qs.Modules.Plugins
-import Quickshell.Io
 import "./dms-common"
 import "."
 
@@ -27,56 +26,67 @@ PluginSettings {
         return year + "-" + month + "-" + day;
     }
 
+    // One pass over the 365-day window: total, week total, today and the
+    // best days all come from the same lookups.
     function refreshStats() {
         if (!pluginService)
             return;
         const today = new Date();
         const todayKey = root.formatDateKey(today);
-        let weekTotal = 0;
-        let contributors = [];
-
-        for (let i = 0; i < 7; i++) {
-            const date = new Date(today);
-            date.setDate(today.getDate() - i);
-            const dateKey = root.formatDateKey(date);
-            const count = pluginService.loadPluginState(root.pluginId, "completedPomodoros-" + dateKey, 0) || 0;
-            weekTotal += count;
-            if (count > 0) {
-                contributors.push({ date: dateKey, count: count });
-            }
-        }
-
-        contributors.sort((a, b) => b.count - a.count);
-
         let total = 0;
+        let weekTotal = 0;
+        const contributors = [];
+
         for (let d = 0; d < 365; d++) {
             const date = new Date(today);
             date.setDate(today.getDate() - d);
             const dateKey = root.formatDateKey(date);
             const count = pluginService.loadPluginState(root.pluginId, "completedPomodoros-" + dateKey, 0) || 0;
             total += count;
+            if (d < 7)
+                weekTotal += count;
+            if (count > 0)
+                contributors.push({ date: dateKey, count: count });
         }
+
+        contributors.sort((a, b) => b.count - a.count);
 
         root.stats = {
             today: pluginService.loadPluginState(root.pluginId, "completedPomodoros-" + todayKey, 0) || 0,
             week: weekTotal,
             total: total,
-            contributors: contributors
+            contributors: contributors.slice(0, 5)
         };
+    }
+
+    function scheduleStatsRefresh() {
+        statsRefreshTimer.restart();
+    }
+
+    Timer {
+        id: statsRefreshTimer
+        interval: 150
+        repeat: false
+        onTriggered: root.refreshStats()
     }
 
     function resetStats() {
         if (!pluginService)
             return;
-        const today = new Date();
-        for (let d = 0; d < 400; d++) {
-            const date = new Date(today);
-            date.setDate(today.getDate() - d);
-            const dateKey = root.formatDateKey(date);
-            pluginService.removePluginStateKey(root.pluginId, "completedPomodoros-" + dateKey);
+        // A single atomic clear beats ~400 removePluginStateKey calls, each of
+        // which emitted pluginStateChanged and scheduled a disk write.
+        if (typeof PluginService.clearPluginState === "function") {
+            PluginService.clearPluginState(root.pluginId);
+        } else {
+            const today = new Date();
+            for (let d = 0; d < 400; d++) {
+                const date = new Date(today);
+                date.setDate(today.getDate() - d);
+                pluginService.removePluginStateKey(root.pluginId, "completedPomodoros-" + root.formatDateKey(date));
+            }
+            pluginService.removePluginStateKey(root.pluginId, "cycleCounter");
+            pluginService.removePluginStateKey(root.pluginId, "cycleResetDate");
         }
-        pluginService.removePluginStateKey(root.pluginId, "cycleCounter");
-        pluginService.removePluginStateKey(root.pluginId, "cycleResetDate");
         PluginService.setGlobalVar(root.pluginId, "completedPomodoros", 0);
         root.refreshStats();
     }
@@ -86,10 +96,13 @@ PluginSettings {
         interval: 500
         repeat: true
         running: true
+        property int attempts: 0
         onTriggered: {
             if (pluginService) {
                 running = false;
                 root.refreshStats();
+            } else if (++attempts > 20) {
+                running = false;
             }
         }
     }
@@ -99,11 +112,11 @@ PluginSettings {
         ignoreUnknownSignals: true
         function onPluginStateChanged(changedPluginId) {
             if (changedPluginId === "dmsKetchup")
-                root.refreshStats();
+                root.scheduleStatsRefresh();
         }
         function onGlobalVarChanged(changedPluginId, varName) {
             if (changedPluginId === "dmsKetchup" && varName === "completedPomodoros")
-                root.refreshStats();
+                root.scheduleStatsRefresh();
         }
     }
 
@@ -145,6 +158,7 @@ PluginSettings {
             }
 
             SliderSettingPlus {
+                id: workSlider
                 settingKey: "workDuration"
                 label: root.tr("Work Duration", "Duración de trabajo")
                 description: root.tr("Length of each focus session", "Duración de cada sesión de enfoque")
@@ -157,6 +171,7 @@ PluginSettings {
             }
 
             SliderSettingPlus {
+                id: shortSlider
                 settingKey: "shortBreakDuration"
                 label: root.tr("Short Break", "Descanso corto")
                 description: root.tr("Break after each session", "Descanso después de cada sesión")
@@ -169,6 +184,7 @@ PluginSettings {
             }
 
             SliderSettingPlus {
+                id: longSlider
                 settingKey: "longBreakDuration"
                 label: root.tr("Long Break", "Descanso largo")
                 description: root.tr("Break after 4 sessions", "Descanso después de 4 sesiones")
@@ -181,6 +197,7 @@ PluginSettings {
             }
 
             SliderSettingPlus {
+                id: sessionsSlider
                 settingKey: "sessionsPerLongBreak"
                 label: root.tr("Sessions before long break", "Sesiones antes del descanso largo")
                 description: root.tr("How many work sessions make up one cycle", "Cuántas sesiones de trabajo forman un ciclo")
@@ -512,7 +529,10 @@ PluginSettings {
             }
 
             StyledText {
-                text: root.tr("DMS Ketchup squeezes focused work sessions into short bursts, followed by breaks to recharge. After " + root.sessionsPerLongBreak + " sessions, take a longer break.\n\n• Work: " + root.workDuration + " minutes of focused work\n• Short Break: " + root.shortBreakDuration + " minute rest\n• Long Break: " + root.longBreakDuration + " minutes after " + root.sessionsPerLongBreak + " sessions\n\nNotifications will alert you when each session completes.", "DMS Ketchup exprime las sesiones de trabajo en ráfagas cortas, seguidas de descansos para recargar. Después de " + root.sessionsPerLongBreak + " sesiones, toma un descanso largo.\n\n• Trabajo: " + root.workDuration + " minutos de trabajo concentrado\n• Descanso corto: " + root.shortBreakDuration + " minutos de pausa\n• Descanso largo: " + root.longBreakDuration + " minutos después de " + root.sessionsPerLongBreak + " sesiones\n\nLas notificaciones te avisarán cuando termine cada sesión.")
+                // Read the live slider values: `PluginSettings` has no
+                // workDuration/... properties, so `root.workDuration` was
+                // undefined and the About card said "undefined minutes".
+                text: root.tr("DMS Ketchup squeezes focused work sessions into short bursts, followed by breaks to recharge. After " + sessionsSlider.value + " sessions, take a longer break.\n\n• Work: " + workSlider.value + " minutes of focused work\n• Short Break: " + shortSlider.value + " minute rest\n• Long Break: " + longSlider.value + " minutes after " + sessionsSlider.value + " sessions\n\nNotifications will alert you when each session completes.", "DMS Ketchup exprime las sesiones de trabajo en ráfagas cortas, seguidas de descansos para recargar. Después de " + sessionsSlider.value + " sesiones, toma un descanso largo.\n\n• Trabajo: " + workSlider.value + " minutos de trabajo concentrado\n• Descanso corto: " + shortSlider.value + " minutos de pausa\n• Descanso largo: " + longSlider.value + " minutos después de " + sessionsSlider.value + " sesiones\n\nLas notificaciones te avisarán cuando termine cada sesión.")
                 font.pixelSize: Theme.fontSizeSmall
                 color: Theme.surfaceVariantText
                 wrapMode: Text.WordWrap

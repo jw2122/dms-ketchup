@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 import qs.Common
 import qs.Widgets
+import "./dms-common/BarInsets.js" as BarInsets
 
 Item {
     id: rootOverlay
@@ -10,6 +11,7 @@ Item {
     property var pluginRoot: null
     property bool isOpen: false
     property string phase: "hidden"
+    property bool running: false
     property string timerState: "work"
     property int remainingSeconds: 0
     property int totalSeconds: 0
@@ -57,6 +59,15 @@ Item {
         return phase === "complete" ? pluginRoot.tr("Continue working", "Seguir trabajando") : pluginRoot.tr("Skip break", "Omitir descanso");
     }
 
+    function pauseLabel() {
+        return running ? pluginRoot.tr("Pause break", "Pausar descanso") : pluginRoot.tr("Resume break", "Reanudar descanso");
+    }
+
+    function togglePause() {
+        if (pluginRoot)
+            pluginRoot.toggleBreakPause();
+    }
+
     function breakIcon() {
         if (phase === "complete")
             return "check_circle";
@@ -97,10 +108,13 @@ Item {
             pluginRoot.stopBreakAndContinue();
     }
 
-    Repeater {
+    // Variants (not Repeater): PanelWindow is a Window, not an Item, so a
+    // Repeater delegate silently failed with "Delegate must be of Item type"
+    // and the overlay never appeared.
+    Variants {
         model: Quickshell.screens
 
-        delegate: PanelWindow {
+        PanelWindow {
             required property var modelData
             screen: modelData
             visible: rootOverlay.visible
@@ -153,6 +167,13 @@ Item {
                     Keys.onEnterPressed: (event) => {
                         if (rootOverlay.phase === "complete") {
                             rootOverlay.onAction();
+                            event.accepted = true;
+                        }
+                    }
+
+                    Keys.onSpacePressed: (event) => {
+                        if (rootOverlay.phase !== "complete") {
+                            rootOverlay.togglePause();
                             event.accepted = true;
                         }
                     }
@@ -261,14 +282,45 @@ Item {
                             onClicked: rootOverlay.onAction()
                         }
 
-                        Item {
-                            width: parent.width
+                        Row {
+                            anchors.horizontalCenter: parent.horizontalCenter
                             height: skipPill.height
+                            spacing: Theme.spacingM
                             visible: rootOverlay.phase !== "complete"
+
+                            // Pause / resume the break countdown without
+                            // leaving the overlay (also on Space).
+                            StyledRect {
+                                id: pausePill
+                                width: pauseText.implicitWidth + Theme.spacingXL * 2
+                                height: 40
+                                radius: 20
+                                color: pauseArea.containsMouse
+                                    ? Theme.withAlpha(Theme.surfaceText, 0.10)
+                                    : Theme.withAlpha(Theme.surfaceText, 0.05)
+                                border.width: 1
+                                border.color: Theme.withAlpha(rootOverlay.stateColor(), 0.25)
+
+                                StyledText {
+                                    id: pauseText
+                                    anchors.centerIn: parent
+                                    text: rootOverlay.pauseLabel()
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.surfaceText
+                                }
+
+                                MouseArea {
+                                    id: pauseArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    Accessible.name: rootOverlay.pauseLabel()
+                                    onClicked: rootOverlay.togglePause()
+                                }
+                            }
 
                             StyledRect {
                                 id: skipPill
-                                anchors.horizontalCenter: parent.horizontalCenter
                                 width: skipText.implicitWidth + Theme.spacingXL * 2
                                 height: 40
                                 radius: 20
@@ -289,6 +341,7 @@ Item {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
+                                    Accessible.name: rootOverlay.actionLabel()
                                     onClicked: rootOverlay.onAction()
                                 }
                             }
@@ -298,28 +351,13 @@ Item {
             }
 
             function getOffset(edge) {
-                if (typeof SettingsData === "undefined") return 0;
-                let offset = 0;
-                if (SettingsData.barConfigs) {
-                    SettingsData.barConfigs.forEach(cfg => {
-                        if (!cfg.enabled || !cfg.visible) return;
-                        let onThisScreen = (!cfg.screenPreferences || cfg.screenPreferences.includes("all")) ? true : cfg.screenPreferences.includes(modelData.name);
-                        if (!onThisScreen) return;
-                        let edgeMatch = (edge === "top" && cfg.position === 0) || (edge === "bottom" && cfg.position === 1) || (edge === "left" && cfg.position === 2) || (edge === "right" && cfg.position === 3);
-                        if (edgeMatch) {
-                            let thickness = SettingsData.frameEnabled ? SettingsData.frameBarSize : Math.max(20, 26 + (cfg.innerPadding ?? 4) * 0.6) + (cfg.innerPadding ?? 4) + 4 + (cfg.spacing ?? 4) + ((typeof Theme !== "undefined" && Theme.isConnectedEffect) ? 0 : (cfg.bottomGap ?? 0));
-                            offset = Math.max(offset, thickness);
-                        }
-                    });
-                }
-                if (SettingsData.dockEnabled && modelData === Quickshell.screens[0]) {
-                    let edgeMatch = (edge === "top" && SettingsData.dockPosition === 0) || (edge === "bottom" && SettingsData.dockPosition === 1) || (edge === "left" && SettingsData.dockPosition === 2) || (edge === "right" && SettingsData.dockPosition === 3);
-                    if (edgeMatch) {
-                        let thickness = (SettingsData.dockIconSize ?? 40) + (SettingsData.dockSpacing ?? 4) * 2 + (SettingsData.dockBorderEnabled ? (SettingsData.dockBorderThickness ?? 1) : 0) * 2 + (SettingsData.dockBottomGap ?? 0) + ((typeof Theme !== "undefined" && Theme.isConnectedEffect) ? 0 : (SettingsData.dockMargin ?? 0)) + 8;
-                        offset = Math.max(offset, thickness);
-                    }
-                }
-                return offset;
+                return BarInsets.edgeOffset(
+                    edge,
+                    modelData,
+                    Quickshell,
+                    typeof SettingsData !== "undefined" ? SettingsData : null,
+                    typeof Theme !== "undefined" ? Theme : null
+                );
             }
 
             Connections {

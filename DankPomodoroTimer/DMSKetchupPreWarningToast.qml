@@ -3,17 +3,20 @@ import Quickshell
 import Quickshell.Wayland
 import qs.Common
 import qs.Widgets
+import "./dms-common/BarInsets.js" as BarInsets
 
 PanelWindow {
     id: root
 
     property var pluginRoot
 
-    width: 320
-    height: 140
+    implicitWidth: 320
+    implicitHeight: 140
     color: "transparent"
 
-    screen: Quickshell.primaryScreen
+    // Quickshell has no `primaryScreen`; resolving screens[0] also stops the
+    // "Unable to assign [undefined] to QuickshellScreenInfo*" warning.
+    screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
 
     property string alignment: pluginRoot.pluginData.preWarningAlignment ?? "bottom-right"
 
@@ -54,67 +57,13 @@ PanelWindow {
     }
 
     function getOffset(edge) {
-        if (typeof SettingsData === "undefined") return 0;
-        let offset = 0;
-
-        // Bars
-        if (SettingsData.barConfigs) {
-            SettingsData.barConfigs.forEach(cfg => {
-                if (!cfg.enabled || !cfg.visible) return;
-                
-                let onThisScreen = false;
-                if (!cfg.screenPreferences || cfg.screenPreferences.includes("all")) onThisScreen = true;
-                else onThisScreen = cfg.screenPreferences.includes(root.screen.name);
-                
-                if (!onThisScreen) return;
-
-                // Position: 0=Top, 1=Bottom, 2=Left, 3=Right
-                let edgeMatch = false;
-                if (edge === "top" && cfg.position === 0) edgeMatch = true;
-                else if (edge === "bottom" && cfg.position === 1) edgeMatch = true;
-                else if (edge === "left" && cfg.position === 2) edgeMatch = true;
-                else if (edge === "right" && cfg.position === 3) edgeMatch = true;
-
-                if (edgeMatch) {
-                    const innerPadding = cfg.innerPadding ?? 4;
-                    const spacing = cfg.spacing ?? 4;
-                    const bottomGap = (typeof Theme !== "undefined" && Theme.isConnectedEffect) ? 0 : (cfg.bottomGap ?? 0);
-                    let thickness = 0;
-                    if (SettingsData.frameEnabled) {
-                        thickness = SettingsData.frameBarSize;
-                    } else {
-                        const widgetThickness = Math.max(20, 26 + innerPadding * 0.6);
-                        const barHeight = typeof Theme !== "undefined" ? Theme.barHeight : 48;
-                        const effectiveBarThickness = Math.max(widgetThickness + innerPadding + 4, barHeight - 4 - (8 - innerPadding));
-                        thickness = effectiveBarThickness + spacing + bottomGap;
-                    }
-                    offset = Math.max(offset, thickness);
-                }
-            });
-        }
-
-        // Dock
-        if (SettingsData.dockEnabled && root.screen === Quickshell.screens[0]) {
-            let edgeMatch = false;
-            // Dock Position: 0=Top, 1=Bottom, 2=Left, 3=Right
-            if (edge === "top" && SettingsData.dockPosition === 0) edgeMatch = true;
-            else if (edge === "bottom" && SettingsData.dockPosition === 1) edgeMatch = true;
-            else if (edge === "left" && SettingsData.dockPosition === 2) edgeMatch = true;
-            else if (edge === "right" && SettingsData.dockPosition === 3) edgeMatch = true;
-
-            if (edgeMatch) {
-                const iconSize = SettingsData.dockIconSize ?? 40;
-                const spacing = SettingsData.dockSpacing ?? 4;
-                const borderThickness = SettingsData.dockBorderEnabled ? (SettingsData.dockBorderThickness ?? 1) : 0;
-                const bodyThickness = iconSize + spacing * 2 + borderThickness * 2;
-                const reserveOffset = SettingsData.dockBottomGap ?? 0;
-                const effectiveMargin = (typeof Theme !== "undefined" && Theme.isConnectedEffect) ? 0 : (SettingsData.dockMargin ?? 0);
-                const dockThickness = bodyThickness + reserveOffset + effectiveMargin + 8;
-                offset = Math.max(offset, dockThickness);
-            }
-        }
-
-        return offset;
+        return BarInsets.edgeOffset(
+            edge,
+            root.screen,
+            Quickshell,
+            typeof SettingsData !== "undefined" ? SettingsData : null,
+            typeof Theme !== "undefined" ? Theme : null
+        );
     }
 
     Connections {

@@ -2,7 +2,7 @@
 
 DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
-- Plugin id: `dmsKetchup` (author: Virtual Wolf 369, version 1.3.0, MIT)
+- Plugin id: `dmsKetchup` (author: Virtual Wolf 369, version 1.4.1, MIT)
 - Source repo: `~/.config/DankMaterialShell/plugins/.repos/39b15ac4661f477a/DankPomodoroTimer/`
 
 ## Files
@@ -11,11 +11,12 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 | --- | --- |
 | `DMSKetchupWidget.qml` | Widget: bar pill (horizontal/vertical), popout, timer engine |
 | `DMSKetchupSettings.qml` | Settings page + statistics dashboard |
-| `DMSKetchupFullscreenModal.qml` | Break modal — one `PanelWindow` per screen (`Repeater { model: Quickshell.screens }`) |
+| `DMSKetchupFullscreenModal.qml` | Break modal — one `PanelWindow` per screen (`Variants { model: Quickshell.screens }`) |
 | `DMSKetchupLockWidget.qml` | Desktop/lock-screen widget (`desktop` surface, DMS 2.0 lock screen) |
 | `DMSKetchupPreWarningToast.qml` | Pre-warning toast (primary screen only) |
 | `translations/` | Motivational phrases, one `<lang>.json` per language (18 languages) |
 | `dms-common/` | Design-system components copied from takeABreak (SettingsCard, SectionTitle, InfoTile, DankButton, ...) |
+| `dms-common/BarInsets.js` | Shared bar/dock inset maths for the modal and the toast (plain JS library) |
 | `plugin.json` / `qmldir` | Plugin manifest / QML module |
 
 `plugin.json` declares both surfaces: the legacy `"component"` (bar widget, older DMS fallback) and `"components": { "widget": ..., "desktop": ... }`, which DMS 2.0's `_resolveComponentPaths` prefers. The `desktop` surface makes the timer available in both the desktop-widget and lock-screen-widget libraries (plugin desktop surfaces are listed in both; there is no lock-only flag).
@@ -23,10 +24,12 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 ## Timer model
 
 - States: `work`, `shortBreak`, `longBreak` (stored in the `timerState` global var)
-- Durations come from settings as **strings** (`"25"`, `"5"`, `"15"`); `toDuration()` sanitizes (replaces `,` with `.`) before `parseFloat`
+- Durations come from settings; the sliders store numbers, and every value goes through `toDuration()` (replaces `,` with `.`, `parseFloat`, rejects NaN/negative) so old string values (`"25"`, `"1,5"`) keep working
 - Cross-instance / cross-screen state lives in `PluginGlobalVar`s (namespaced per plugin id, in-memory, reactive via `globalVarChanged`):
   - `remainingSeconds`, `totalSeconds`, `isRunning`, `timerState`, `completedPomodoros`, `timerOwnerId`
 - Only the instance whose `instanceId` matches `timerOwnerId` runs the 1s `Timer`; every instance renders the shared values, so all screens show the same countdown
+- Duration settings are only re-based by the owner instance: a second bar instance that loads with fallback durations must not rewrite a running session's `totalSeconds`/`remainingSeconds`
+- Startup initialisation (session reset + auto-start) is claimed by exactly one instance through the shared `initAt` stamp; the other instance skips it. Without this the second instance reset the globals right after the first had auto-started, leaving a paused timer with no display
 
 ## Countdown display
 
@@ -41,6 +44,13 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 - Break modal: centered card (`Theme.cornerRadiusXL`, `Theme.foregroundColor(Theme.cardSurface)`, 1 px `outlineMedium`), tinted state-icon badge, state-colored 96 px countdown, rounded progress track, primary "Continue working" button, subtle "Skip break" pill, and a soft top gradient tinted by the state color.
 - State colors: `Theme.primary` (work), `Theme.info` (short break), `Theme.warning` (long break), `Theme.success` (break complete).
 - Popout: monospace countdown with a rounded-cap Canvas ring, filled primary play/pause circle, tonal reset circle, intrinsic-width quick-action pills in a centered row.
+
+## Break overlay controls
+
+- The fullscreen break card has a pause/resume pill ("Pause break" / "Resume break") next to "Skip break"; `Space` toggles it and `Esc` closes/handles the card
+- Pause/resume calls the engine's `toggleBreakPause()`; resuming after a pause re-pauses any media player that started playing in the meantime
+- `Skip break` runs `stopBreakAndContinue()`: closes the modal and starts a running work session
+- The overlay only opens when `fullscreenBreakModalEnabled` is on; otherwise the break runs as a background countdown
 
 ## Lock-screen / desktop widget
 
@@ -64,17 +74,17 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals, plus the loginctl probe fallback) funnel into `handleUnlocked()`. With the toggle on:
 
-- Break finished while the screen was locked (deferred `"complete"` modal, or the modal opened behind the lock screen in the default loginctl-signal config) -> next work session starts immediately (respects `autoStartPomodoros`), no modal
+- Break finished while the screen was locked (deferred `"complete"` modal, or the modal opened behind the lock screen in the default loginctl-signal config) -> next work session starts immediately as a **running** session (the unlock toggle is the explicit user choice), no modal
 - Break still counting down while locked -> modal re-opens as before (a live break is not cut short)
 - Work session was **running** (e.g. resumed from the lock screen) -> it simply keeps running; the stale away snapshot is discarded (`cancelAway()`), so no reset/repeat happens
-- Work session was **paused** -> today's away restore/repeat/reset logic applies unchanged
+- Work session was **paused** -> today's away restore/repeat/reset logic applies; with `autoStartWorkOnUnlock` on, a paused work session is then resumed (remaining time kept) instead of staying paused. With the toggle off it stays paused.
 - No session running at all (fresh boot, or after Reset) -> a fresh work session starts — "whenever I want to use the device"
 
 ## Startup behavior (`autoStartWorkOnStartup`, default off)
 
 - When the shell starts (boot, SDDM login, `dms restart`) and no session is running (`timerDisplayActive` false), a fresh work session starts
 - Deferred via `Qt.callLater` — the base `PluginComponent` populates `pluginData` in its own `Component.onCompleted`, which runs after the widget's, so an inline check reads empty settings
-- The second bar instance skips (the first one sets `timerDisplayActive`) — no double start, no double sound
+- The second bar instance skips auto-start: the first one claims the shared `initAt` stamp (`initializationOwner`) before it initialises or starts anything — no double start, no double sound
 
 ## Media pause
 
@@ -102,14 +112,21 @@ All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals,
 
 ## Notifications
 
-- Push notifications (`notify-send`) are only sent when `SessionData.doNotDisturb` is off — checked at send time, so manually enabled, scheduled (`doNotDisturbUntil`), or app-set DND suppresses them
+- Push notifications (`notify-send -u normal <title> <body>`) are sent with a direct argv — no shell and no quote escaping; only when `SessionData.doNotDisturb` is off and the session is not locked — checked at send time, so manually enabled, scheduled (`doNotDisturbUntil`), or app-set DND suppresses them
 - With `autoSetDND` on, the shell's own DND is cleared at session end (before the check), so the break notification still fires
 - Sounds and in-app UI (pre-warning toast, fullscreen modal) are unaffected
 
+## Sounds
+
+- The player is resolved once per shell start (`pw-play` → `paplay` → `aplay` → `ffplay` → `play`) with one `Process` probe; sounds are then played by direct argv
+- A sound requested while the probe is still running is kept in `pendingSoundPath` and played as soon as a player is known (no dropped chime)
+- No shell string, no `which`, and no per-chime process tree beyond the player itself
+
 ## IPC
 
-Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBreak`, `startLongBreak`, plus the lock-widget actions `lockStart`, `lockPause`, `lockResume`, `lockContinue`.
+Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBreak`, `startLongBreak`, `status`, plus the lock-widget actions `lockStart`, `lockPause`, `lockResume`, `lockContinue`.
 
+- `status` returns JSON with `state`, `running`, `remaining`, `total`, `displayActive`, `completed`, `modalOpen`, `modalPhase`, `locked`, `deferredPhase` — used for live verification and scripting
 - `lockPause` pauses a work session that has no away snapshot yet and, when the session is locked, starts a fresh away snapshot first (same effect as locking at that moment). Breaks are only paused.
 - `lockResume` cancels the away snapshot and (re)starts the countdown.
 - `lockContinue` clears `deferredBreakModalPhase` / `breakModalArmed`, closes the break modal and starts a running work session, so unlocking afterwards cannot handle the break-complete state twice.
@@ -159,4 +176,12 @@ Return:
 
 ## Statistics dashboard (settings)
 
-Today / This Week / Total (365 days) / Best Day / Top 5 days; Refresh and Reset Stats buttons. Reads the same per-day keys as the widget; refreshed on `pluginStateChanged` / `globalVarChanged` and every 10 s.
+Today / This Week / Total (365 days) / Best Day / Top 5 days; Refresh and Reset Stats buttons. Reads the same per-day keys as the widget in a **single pass** over the 365-day window; refreshed on `pluginStateChanged` / `globalVarChanged` through a 150 ms debounce timer (a completion writes several keys in one burst). Reset uses `PluginService.clearPluginState` when available instead of hundreds of individual key removals.
+
+## Runtime cost (v1.4.1)
+
+- One global write per second at most while a session is visible; `showSecondsOnly` only writes when the value actually changes (it used to emit `globalVarChanged` every second)
+- No polling in the default configuration: the lock probe runs only when `loginctlLockIntegration` is disabled, only while a timer is visible, and every 30 s instead of every 10 s
+- No periodic shell spawns: sounds and notifications use one-shot player resolution and direct argv
+- The settings statistics page does one 365-key pass per refresh, debounced to 150 ms, instead of a separate pass per metric and per day
+- Desktop/lock widget reads reactive `pluginData` instead of duplicating the duration values

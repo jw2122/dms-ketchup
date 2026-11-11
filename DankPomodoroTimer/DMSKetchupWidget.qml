@@ -52,10 +52,13 @@ PluginComponent {
     property real preWarningOpacity: (pluginData.preWarningOpacity ?? 100) / 100
     property bool isPreWarning: false
     property var preWarningWindow: null
+    property var preWarningComponent: null
     property int preWarningCountdown: 0
-    property string uiLanguage: "en"
-    property string startWorkSoundUrl: "file:///usr/share/sounds/freedesktop/stereo/message.oga"
-    property string endWorkSoundUrl: "file:///usr/share/sounds/freedesktop/stereo/message.oga"
+    property string startWorkSoundUrl: pluginData.startWorkSoundUrl ?? "file:///usr/share/sounds/freedesktop/stereo/message.oga"
+    property string endWorkSoundUrl: pluginData.endWorkSoundUrl ?? "file:///usr/share/sounds/freedesktop/stereo/message.oga"
+    property string soundPlayer: ""
+    property string pendingSoundPath: ""
+    property bool soundPlayerResolved: false
     property bool blinkVisible: true
 
     Timer {
@@ -68,6 +71,29 @@ PluginComponent {
         }
     }
 
+    // Resolve the first available audio player once instead of spawning a
+    // shell + probe loop for every chime.
+    Process {
+        id: soundPlayerProbe
+        command: ["sh", "-c", "command -v pw-play || command -v paplay || command -v aplay || command -v ffplay || command -v play"]
+        running: true
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: function(data) {
+                const path = data.trim();
+                if (!path)
+                    return;
+                root.soundPlayer = path;
+                if (root.pendingSoundPath !== "") {
+                    const pending = root.pendingSoundPath;
+                    root.pendingSoundPath = "";
+                    root.playSoundFile(pending);
+                }
+            }
+        }
+        onExited: root.soundPlayerResolved = true
+    }
+
     function tr(en, es) {
         const localeName = (typeof I18n !== "undefined" && I18n.locale) ? I18n.locale().name : "en-US";
         return localeName.toLowerCase().startsWith("es") ? es : en;
@@ -75,57 +101,75 @@ PluginComponent {
     property bool breakModalOpen: false
     property string breakModalPhase: "hidden"
     property bool startupGuard: true
-    property bool startupModalSuppression: true
     property bool sessionLocked: false
     property bool lockProbeBusy: false
     property bool breakModalArmed: false
     property int bootModalSuppressUntil: 0
     property string deferredBreakModalPhase: ""
 
+    function armStartupSuppression() {
+        root.startupGuard = true;
+        root.bootModalSuppressUntil = Date.now() + 20000;
+        root.deferredBreakModalPhase = "";
+        root.closeBreakModal();
+        bootGuardTimer.restart();
+    }
+
+    function endStartupSuppression() {
+        root.startupGuard = false;
+        root.bootModalSuppressUntil = 0;
+        const phase = root.deferredBreakModalPhase;
+        root.deferredBreakModalPhase = "";
+        // A break that finished while the shell was still starting up must
+        // not be silently dropped.
+        if (phase !== "")
+            root.openBreakModal(phase);
+    }
+
     onPluginServiceChanged: {
-        if (pluginService) {
-                startupGuard = true;
-            startupModalSuppression = true;
-            sessionLocked = false;
-            breakModalArmed = false;
-            bootModalSuppressUntil = Date.now() + 20000;
-            deferredBreakModalPhase = "";
-            Qt.callLater(loadPhrases);
-            currentDateKey = formatDateKey(new Date());
-            let savedCounter = pluginService.loadPluginState(statePluginId, "cycleCounter", -1);
-            if (savedCounter === null || savedCounter === undefined || savedCounter < 0)
-                savedCounter = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + currentDateKey, 0) || 0;
-            globalCompletedPomodoros.set(savedCounter);
-            loadLast7Days();
-            closeBreakModal();
-            root.closePreWarning();
-            globalTimerDisplayActive.set(false);
-            root.startupModalSuppression = false;
-        globalTimerState.set("work");
-            globalTotalSeconds.set(root.workDuration * 60);
-            globalRemainingSeconds.set(globalTotalSeconds.value);
-            globalTimerOwnerId.set(root.instanceId);
-            globalIsRunning.set(false);
-            lockStateProbeTimer.restart();
-            checkCycleReset();
+        if (!pluginService)
+            return;
+        // Let exactly one of the two bar instances initialise the session.
+        // The other one used to reset the globals barely after the first had
+        // auto-started, which left the timer paused with no display.
+        const initNow = Date.now();
+        if (initNow - globalInitAt.value < 5000) {
+            root.initializationOwner = false;
+            return;
         }
+        globalInitAt.set(initNow);
+        root.initializationOwner = true;
+        root.armStartupSuppression();
+        root.sessionLocked = false;
+        root.breakModalArmed = false;
+        Qt.callLater(loadPhrases);
+        root.currentDateKey = formatDateKey(new Date());
+        let savedCounter = pluginService.loadPluginState(statePluginId, "cycleCounter", -1);
+        if (savedCounter === null || savedCounter === undefined || savedCounter < 0)
+            savedCounter = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + root.currentDateKey, 0) || 0;
+        globalCompletedPomodoros.set(savedCounter);
+        root.loadLast7Days();
+        root.closePreWarning();
+        globalTimerDisplayActive.set(false);
+        globalTimerState.set("work");
+        globalTotalSeconds.set(root.workDuration * 60);
+        globalRemainingSeconds.set(globalTotalSeconds.value);
+        globalTimerOwnerId.set(root.instanceId);
+        globalIsRunning.set(false);
+        root.checkCycleReset();
     }
 
     Component.onCompleted: {
-        closeBreakModal();
+        root.closeBreakModal();
         root.closePreWarning();
-        startupGuard = true;
-        startupModalSuppression = true;
-        sessionLocked = false;
-        breakModalArmed = false;
-        bootModalSuppressUntil = Date.now() + 20000;
-            deferredBreakModalPhase = "";
-        lockStateProbeTimer.restart();
+        root.sessionLocked = false;
+        root.breakModalArmed = false;
+        root.armStartupSuppression();
         Qt.callLater(loadPhrases);
         // Deferred: PluginComponent populates pluginData in its own
         // Component.onCompleted, which runs after this one.
         Qt.callLater(() => {
-            if (root.autoStartWorkOnStartup && !globalTimerDisplayActive.value) {
+            if (root.initializationOwner && root.autoStartWorkOnStartup && !globalTimerDisplayActive.value) {
                 // No session running (fresh boot / login) — start one
                 console.info("[dms-ketchup] auto-starting work session at startup");
                 root.startWork(true, true);
@@ -133,16 +177,19 @@ PluginComponent {
         });
     }
 
+    onFullscreenBreakModalEnabledChanged: {
+        if (!root.fullscreenBreakModalEnabled)
+            root.closeBreakModal();
+    }
+
     onBreakModalOpenChanged: {
-        console.log("[pomodoro-debug] breakModalOpenChanged", "open=", breakModalOpen, "armed=", root.breakModalArmed, "suppUntil=", root.bootModalSuppressUntil, "startupGuard=", root.startupGuard, "supp=", root.startupModalSuppression);
-        if (breakModalOpen && (startupGuard || startupModalSuppression || Date.now() < root.bootModalSuppressUntil)) {
+        if (breakModalOpen && (startupGuard || Date.now() < root.bootModalSuppressUntil)) {
             breakModalOpen = false;
             breakModalPhase = "hidden";
             return;
         }
-        if (!breakModalOpen) {
+        if (!breakModalOpen)
             breakModalPhase = "hidden";
-        }
     }
 
     Process {
@@ -158,8 +205,8 @@ PluginComponent {
                 root.sessionLocked = locked;
                 if (locked) {
                     if (root.breakModalOpen) {
-                        root.closeBreakModal();
                         root.deferredBreakModalPhase = root.breakModalPhase;
+                        root.closeBreakModal();
                     }
                     beginAway("lock");
                 } else if (changed) {
@@ -197,8 +244,8 @@ PluginComponent {
         function onSessionLocked() {
             root.sessionLocked = true;
             if (root.breakModalOpen) {
-                root.closeBreakModal();
                 root.deferredBreakModalPhase = root.breakModalPhase;
+                root.closeBreakModal();
             }
             beginAway("lock");
         }
@@ -211,21 +258,13 @@ PluginComponent {
         }
     }
 
+    // Single-shot: the old 250 ms poll fired 80 times per shell start just to
+    // clear a pair of booleans.
     Timer {
-        id: bootModalSuppressTimer
-        interval: 250
-        repeat: true
-        running: true
-        onTriggered: {
-            if (Date.now() >= root.bootModalSuppressUntil) {
-                running = false;
-                root.startupGuard = false;
-                root.startupModalSuppression = false;
-                root.deferredBreakModalPhase = "";
-            } else {
-                root.closeBreakModal();
-            }
-        }
+        id: bootGuardTimer
+        interval: 20000
+        repeat: false
+        onTriggered: root.endStartupSuppression()
     }
 
     Timer {
@@ -256,19 +295,13 @@ PluginComponent {
             return;
         let data = [];
         const today = new Date();
-        const todayKey = formatDateKey(today);
 
         for (let i = 6; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(today.getDate() - i);
             const dateKey = formatDateKey(date);
 
-            let count = 0;
-            if (dateKey === todayKey) {
-                count = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + todayKey, 0) || 0;
-            } else {
-                count = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + dateKey, 0) || 0;
-            }
+            const count = pluginService.loadPluginState(statePluginId, "completedPomodoros-" + dateKey, 0) || 0;
 
             data.push({
                 date: dateKey,
@@ -278,13 +311,14 @@ PluginComponent {
         }
 
         last7DaysData = data;
-        cleanupOldData();
     }
 
-    function cleanupOldData() {
-        return;
-    }
+    // Only the instance that owns the running session may re-base the
+    // countdown. A second bar instance loading with its fallback duration
+    // used to rewrite the globals and cut the session short.
     onWorkDurationChanged: {
+        if (globalTimerOwnerId.value !== root.instanceId)
+            return;
         if (globalTimerState.value === "work" && globalTotalSeconds.value > 0) {
             const newTotal = workDuration * 60;
             const elapsed = globalTotalSeconds.value - globalRemainingSeconds.value;
@@ -294,6 +328,8 @@ PluginComponent {
     }
 
     onShortBreakDurationChanged: {
+        if (globalTimerOwnerId.value !== root.instanceId)
+            return;
         if (globalTimerState.value === "shortBreak" && globalTotalSeconds.value > 0) {
             const newTotal = shortBreakDuration * 60;
             const elapsed = globalTotalSeconds.value - globalRemainingSeconds.value;
@@ -303,6 +339,8 @@ PluginComponent {
     }
 
     onLongBreakDurationChanged: {
+        if (globalTimerOwnerId.value !== root.instanceId)
+            return;
         if (globalTimerState.value === "longBreak" && globalTotalSeconds.value > 0) {
             const newTotal = longBreakDuration * 60;
             const elapsed = globalTotalSeconds.value - globalRemainingSeconds.value;
@@ -385,32 +423,61 @@ PluginComponent {
         defaultValue: false
     }
 
+    // One bar instance per screen loads this plugin. Without a shared stamp
+    // the second instance re-ran the session reset a moment after the first
+    // had auto-started, leaving a paused, invisible timer.
+    PluginGlobalVar {
+        id: globalInitAt
+        varName: "initAt"
+        defaultValue: 0
+    }
+
+    property bool initializationOwner: false
+
+    // Both bar instances receive every unlock signal. Without this stamp each
+    // of them replayed the deferred modal / auto-start logic on its own.
+    PluginGlobalVar {
+        id: globalUnlockHandledAt
+        varName: "unlockHandledAt"
+        defaultValue: 0
+    }
+
     property string instanceId: Math.random().toString(36).substring(2)
     readonly property string statePluginId: "dmsKetchup"
 
-        Timer {
-            id: pomodoroTimer
-            interval: 1000
-            repeat: true
-            running: globalIsRunning.value && globalTimerOwnerId.value === root.instanceId
+    // PluginService.setGlobalVar always rebuilds the global object and emits
+    // globalVarChanged, even for an identical value. Only write on changes.
+    function setShowSecondsOnly(value) {
+        if (globalShowSecondsOnly.value !== value)
+            globalShowSecondsOnly.set(value);
+    }
+
+    Timer {
+        id: pomodoroTimer
+        interval: 1000
+        repeat: true
+        running: globalIsRunning.value && globalTimerOwnerId.value === root.instanceId
         onTriggered: {
             if (globalRemainingSeconds.value > 0) {
-                    globalRemainingSeconds.set(globalRemainingSeconds.value - 1);
+                globalRemainingSeconds.set(globalRemainingSeconds.value - 1);
+                if (root.preWarningWindow)
                     root.preWarningCountdown = globalRemainingSeconds.value;
-                    if (globalRemainingSeconds.value < 60) {
+                if (globalRemainingSeconds.value < 60) {
+                    if (!globalShowSecondsOnly.value) {
                         globalShowSecondsOnly.set(true);
                         root.blinkVisible = true;
-                    } else {
-                        globalShowSecondsOnly.set(false);
-                    }
-                    if (root.enablePreWarning && !root.isPreWarning && globalTimerState.value === "work" && globalRemainingSeconds.value === root.preWarningTime) {
-                        root.showPreWarning();
                     }
                 } else {
-                    root.timerComplete();
+                    root.setShowSecondsOnly(false);
                 }
+                if (root.enablePreWarning && !root.isPreWarning && globalTimerState.value === "work" && globalRemainingSeconds.value === root.preWarningTime) {
+                    root.showPreWarning();
+                }
+            } else {
+                root.timerComplete();
             }
         }
+    }
 
     function timerComplete() {
         globalIsRunning.set(false);
@@ -419,18 +486,24 @@ PluginComponent {
         if (globalTimerState.value === "work") {
             globalCompletedPomodoros.set(globalCompletedPomodoros.value + 1);
             if (pluginService) {
-                    const dateKey = formatDateKey(new Date());
+                const dateKey = formatDateKey(new Date());
                 const statKey = "completedPomodoros-" + dateKey;
                 const todayCount = (pluginService.loadPluginState(statePluginId, statKey, 0) || 0) + 1;
                 pluginService.savePluginState(statePluginId, statKey, todayCount);
                 pluginService.savePluginState(statePluginId, "cycleCounter", globalCompletedPomodoros.value);
-                loadLast7Days();
+                root.loadLast7Days();
             }
             const isLongBreak = globalCompletedPomodoros.value % root.sessionsPerLongBreak === 0;
             root.startCycleBreak(isLongBreak);
         } else {
             root.finishBreak();
         }
+    }
+
+    function notify(title, body) {
+        // Direct argv: no shell, no quote escaping, one fewer process.
+        if (!SessionData.doNotDisturb && !root.sessionLocked)
+            Quickshell.execDetached(["notify-send", "-u", "normal", title, body]);
     }
 
     function startCycleBreak(isLongBreak, interrupted) {
@@ -440,42 +513,21 @@ PluginComponent {
         const notifBody = root.tr("Time for a " + (isLongBreak ? "long" : "short") + " break!", "¡Es hora de un descanso " + (isLongBreak ? "largo" : "corto") + "!");
         // No desktop notification over the lock screen: the lock widget
         // shows the state and the sound still plays.
-        if (!SessionData.doNotDisturb && !root.sessionLocked) {
-            Quickshell.execDetached(["sh", "-c", "notify-send '" + notifTitle.replace(/'/g, "'\''") + "' '" + notifBody.replace(/'/g, "'\''") + "' -u normal"]);
-        }
+        root.notify(notifTitle, notifBody);
         root.playTimerSound("end");
 
-        if (root.autoSetDND) {
+        if (root.autoSetDND)
             SessionData.setDoNotDisturb(false);
-        }
-        if (root.fullscreenBreakModalEnabled) {
-            root.breakModalArmed = true;
-            if (isLongBreak) {
-                root.startLongBreak(true, false, true);
-            } else {
-                root.startShortBreak(true, false, true);
-            }
-            if (root.sessionLocked || root.startupGuard) {
-                root.deferredBreakModalPhase = "running";
-            } else {
-                root.openBreakModal("running");
-            }
-        } else {
-            root.breakModalArmed = true;
-            if (isLongBreak) {
-                root.startLongBreak(root.autoStartBreaks, false, true);
-            } else {
-                root.startShortBreak(root.autoStartBreaks, false, true);
-            }
-        }
+
+        root.breakModalArmed = true;
+        const autoStart = root.fullscreenBreakModalEnabled ? true : root.autoStartBreaks;
+        root.startBreak(isLongBreak ? "longBreak" : "shortBreak", autoStart, false, true);
     }
 
     function finishBreak() {
         // No desktop notification over the lock screen: the lock widget
         // shows the state and the sound still plays.
-        if (!SessionData.doNotDisturb && !root.sessionLocked) {
-            Quickshell.execDetached(["sh", "-c", "notify-send '" + root.tr("Break Complete", "Descanso completo").replace(/'/g, "'\''") + "' '" + root.tr("Ready for another pomodoro?", "¿Listo para otro ciclo?").replace(/'/g, "'\''") + "' -u normal"]);
-        }
+        root.notify(root.tr("Break Complete", "Descanso completo"), root.tr("Ready for another pomodoro?", "¿Listo para otro ciclo?"));
         root.playTimerSound("end");
         if (root.fullscreenBreakModalEnabled && root.requireManualContinueAfterBreak) {
             breakModalPhase = "complete";
@@ -490,6 +542,19 @@ PluginComponent {
         }
     }
 
+    function playSoundFile(localPath) {
+        if (!localPath)
+            return;
+        if (!root.soundPlayer) {
+            // Probe still running (or no player found): play it as soon as
+            // the probe reports a binary.
+            if (!root.soundPlayerResolved)
+                root.pendingSoundPath = localPath;
+            return;
+        }
+        Quickshell.execDetached([root.soundPlayer, localPath]);
+    }
+
     function playTimerSound(kind) {
         if (!root.soundsEnabled)
             return;
@@ -499,12 +564,7 @@ PluginComponent {
             return;
 
         const localPath = soundUrl.startsWith("file://") ? soundUrl.substring(7) : soundUrl;
-        const escapedPath = localPath.replace(/'/g, "'\\''");
-        Quickshell.execDetached([
-            "sh",
-            "-c",
-            "for player in pw-play paplay aplay ffplay play; do if command -v \"$player\" >/dev/null 2>&1; then \"$player\" '" + escapedPath + "' >/dev/null 2>&1; break; fi; done"
-        ]);
+        root.playSoundFile(localPath);
     }
 
     function closeBreakModal() {
@@ -534,15 +594,14 @@ PluginComponent {
         root.startWork(true, true);
     }
 
-    function pauseCurrentTimer() {
-        globalIsRunning.set(false);
-    }
-
     function toggleBreakPause() {
-        if (globalTimerState.value === "shortBreak" || globalTimerState.value === "longBreak") {
-            globalIsRunning.set(!globalIsRunning.value);
-            globalTimerOwnerId.set(root.instanceId);
-        }
+        if (globalTimerState.value !== "shortBreak" && globalTimerState.value !== "longBreak")
+            return;
+        const resume = !globalIsRunning.value;
+        globalTimerOwnerId.set(root.instanceId);
+        globalIsRunning.set(resume);
+        if (resume)
+            root.pauseMediaPlayers();
     }
 
     function stopBreakAndContinue() {
@@ -558,19 +617,21 @@ PluginComponent {
         if (root.sessionLocked)
             return;
         root.isPreWarning = true;
+        root.preWarningCountdown = globalRemainingSeconds.value;
         if (root.preWarningWindow) {
             root.preWarningWindow.destroy();
             root.preWarningWindow = null;
         }
-        const toastComponent = Qt.createComponent("DMSKetchupPreWarningToast.qml");
-        if (toastComponent.status === Component.Ready) {
-            root.preWarningWindow = toastComponent.createObject(root, { "pluginRoot": root });
+        if (!root.preWarningComponent)
+            root.preWarningComponent = Qt.createComponent("DMSKetchupPreWarningToast.qml");
+        if (root.preWarningComponent.status === Component.Ready) {
+            root.preWarningWindow = root.preWarningComponent.createObject(root, { "pluginRoot": root });
             if (!root.preWarningWindow) {
-                console.log("[dms-ketchup] failed to create pre-warning toast");
+                console.warn("[dms-ketchup] failed to create pre-warning toast");
                 root.isPreWarning = false;
             }
         } else {
-            console.log("[dms-ketchup] pre-warning toast error:", toastComponent.errorString());
+            console.warn("[dms-ketchup] pre-warning toast error:", root.preWarningComponent.errorString());
             root.isPreWarning = false;
         }
     }
@@ -692,7 +753,7 @@ PluginComponent {
                 console.info("[dms-ketchup] applyAwayLogic", "continue break, remaining=", remaining);
                 globalTotalSeconds.set(snapshot.total);
                 globalRemainingSeconds.set(remaining);
-                globalShowSecondsOnly.set(remaining < 60);
+                root.setShowSecondsOnly(remaining < 60);
                 if (snapshot.wasRunning)
                     globalTimerOwnerId.set(root.instanceId);
                 globalIsRunning.set(snapshot.wasRunning);
@@ -723,14 +784,22 @@ PluginComponent {
     }
 
     function handleUnlocked() {
-        sessionLocked = false;
+        root.sessionLocked = false;
+        // Both bar instances receive the unlock signals. Only the first one
+        // may replay the away/deferred-modal logic; otherwise the modal is
+        // opened twice and the next work session is started twice.
+        const now = Date.now();
+        if (now - globalUnlockHandledAt.value < 2000)
+            return;
+        globalUnlockHandledAt.set(now);
+
         // Only apply the away reset/repeat logic when the session is still
         // paused. A session that was resumed from the lock screen is a
         // deliberate "I'm working" signal, so it simply continues.
         if (globalIsRunning.value)
             root.cancelAway();
         else
-            endAway();
+            root.endAway();
         // A break that finished while the screen was locked either deferred its
         // modal (probe/startup path) or opened it directly behind the lock
         // screen (default loginctl-signal path) — catch both.
@@ -740,7 +809,7 @@ PluginComponent {
             root.deferredBreakModalPhase = "";
             root.breakModalArmed = false;
             root.closeBreakModal();
-            root.startWork(root.autoStartPomodoros, true);
+            root.startWork(true, true);
             return;
         }
         if (root.deferredBreakModalPhase !== "") {
@@ -754,6 +823,14 @@ PluginComponent {
         } else if (root.autoStartWorkOnUnlock && !globalTimerDisplayActive.value) {
             // No session running at all (fresh boot or reset) — start one
             root.startWork(true, true);
+        } else if (root.autoStartWorkOnUnlock
+                   && globalTimerState.value === "work"
+                   && !globalIsRunning.value) {
+            // The user paused the work session before locking. "Start
+            // pomodoro on unlock" means the session must be running again;
+            // resume it (keeping the remaining time) instead of leaving a
+            // paused timer behind the unlock.
+            root.toggleTimer();
         }
     }
 
@@ -863,22 +940,24 @@ PluginComponent {
     onPhraseLanguageChanged: Qt.callLater(loadPhrases)
 
     function startWork(autoStart, playSoundNow = true) {
+        const running = autoStart ?? false;
         globalTimerState.set("work");
-        globalTotalSeconds.set(root.workDuration * 60);
-        globalRemainingSeconds.set(globalTotalSeconds.value);
-        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
-        root.preWarningCountdown = globalTotalSeconds.value;
+        const total = root.workDuration * 60;
+        globalTotalSeconds.set(total);
+        globalRemainingSeconds.set(total);
+        root.setShowSecondsOnly(total < 60);
+        root.preWarningCountdown = total;
         root.closePreWarning();
         globalTimerOwnerId.set(root.instanceId);
-        globalIsRunning.set(autoStart ?? false);
-        if ((autoStart ?? false) || playSoundNow)
+        globalIsRunning.set(running);
+        if (running || playSoundNow)
             globalTimerDisplayActive.set(true);
         if (root.autoSetDND)
-            SessionData.setDoNotDisturb(autoStart ?? false);
+            SessionData.setDoNotDisturb(running);
         if (playSoundNow)
             root.playTimerSound("start");
         root.breakModalArmed = false;
-        closeBreakModal();
+        root.closeBreakModal();
     }
 
     function pauseMediaPlayers() {
@@ -895,90 +974,69 @@ PluginComponent {
         }
         if (paused > 0)
             console.info("[dms-ketchup] paused", paused, "media player(s) for the break");
-        else
-            console.info("[dms-ketchup] pauseMediaPlayers: no playing players (setting=", root.pauseMediaDuringBreaks, ")");
+    }
+
+    function startBreak(kind, autoStart, openModal, playSoundNow) {
+        const running = autoStart ?? false;
+        root.closePreWarning();
+        if (root.autoSetDND)
+            SessionData.setDoNotDisturb(false);
+        root.breakModalArmed = true;
+        globalTimerState.set(kind);
+        const total = (kind === "longBreak" ? root.longBreakDuration : root.shortBreakDuration) * 60;
+        globalTotalSeconds.set(total);
+        globalRemainingSeconds.set(total);
+        root.setShowSecondsOnly(total < 60);
+        globalTimerOwnerId.set(root.instanceId);
+        globalIsRunning.set(running);
+        if (running)
+            root.pauseMediaPlayers();
+        if (running || playSoundNow)
+            globalTimerDisplayActive.set(true);
+        if (playSoundNow)
+            root.playTimerSound("start");
+        if (root.fullscreenBreakModalEnabled && (openModal || running)) {
+            if (root.sessionLocked || root.startupGuard)
+                root.deferredBreakModalPhase = "running";
+            else
+                root.openBreakModal("running");
+        }
     }
 
     function startShortBreak(autoStart, openModal = false, playSoundNow = true) {
-        root.closePreWarning();
-        console.log("[pomodoro-debug] startShortBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
-        if (root.autoSetDND) {
-            SessionData.setDoNotDisturb(false);
-        }
-        root.breakModalArmed = true;
-        globalTimerState.set("shortBreak");
-        globalTotalSeconds.set(root.shortBreakDuration * 60);
-        globalRemainingSeconds.set(globalTotalSeconds.value);
-        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
-        globalTimerOwnerId.set(root.instanceId);
-        globalIsRunning.set(autoStart ?? false);
-        if (autoStart ?? false)
-            root.pauseMediaPlayers();
-        if ((autoStart ?? false) || playSoundNow)
-            globalTimerDisplayActive.set(true);
-        if (playSoundNow)
-            root.playTimerSound("start");
-        if (openModal || (autoStart ?? false)) {
-            if (root.sessionLocked || root.startupGuard)
-                root.deferredBreakModalPhase = "running";
-            else
-                root.openBreakModal("running");
-        }
+        root.startBreak("shortBreak", autoStart, openModal, playSoundNow);
     }
 
     function startLongBreak(autoStart, openModal = false, playSoundNow = true) {
-        root.closePreWarning();
-        console.log("[pomodoro-debug] startLongBreak", autoStart, openModal, playSoundNow, "startupGuard=", root.startupGuard, "armed=", root.breakModalArmed);
-        if (root.autoSetDND) {
-            SessionData.setDoNotDisturb(false);
-        }
-        root.breakModalArmed = true;
-        globalTimerState.set("longBreak");
-        globalTotalSeconds.set(root.longBreakDuration * 60);
-        globalRemainingSeconds.set(globalTotalSeconds.value);
-        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
-        globalTimerOwnerId.set(root.instanceId);
-        globalIsRunning.set(autoStart ?? false);
-        if (autoStart ?? false)
-            root.pauseMediaPlayers();
-        if ((autoStart ?? false) || playSoundNow)
-            globalTimerDisplayActive.set(true);
-        if (playSoundNow)
-            root.playTimerSound("start");
-        if (openModal || (autoStart ?? false)) {
-            if (root.sessionLocked || root.startupGuard)
-                root.deferredBreakModalPhase = "running";
-            else
-                root.openBreakModal("running");
-        }
+        root.startBreak("longBreak", autoStart, openModal, playSoundNow);
     }
 
     function toggleTimer() {
         if (!globalIsRunning.value) {
             globalTimerOwnerId.set(root.instanceId);
             globalTimerDisplayActive.set(true);
-            if (root.fullscreenBreakModalEnabled && globalTimerState.value !== "work" && !root.sessionLocked) {
+            if (root.fullscreenBreakModalEnabled && globalTimerState.value !== "work" && !root.sessionLocked)
                 root.openBreakModal("running");
-            }
+        } else {
+            // A paused session must not leave a stale pre-warning toast behind.
+            root.closePreWarning();
         }
         globalIsRunning.set(!globalIsRunning.value);
         if (globalIsRunning.value && globalTimerState.value !== "work")
             root.pauseMediaPlayers();
-        if (root.autoSetDND && globalTimerState.value === "work") {
+        if (root.autoSetDND && globalTimerState.value === "work")
             SessionData.setDoNotDisturb(globalIsRunning.value);
-        }
     }
 
     function resetTimer() {
         globalIsRunning.set(false);
         root.closePreWarning();
-        if (root.autoSetDND && globalTimerState.value === "work") {
+        if (root.autoSetDND && globalTimerState.value === "work")
             SessionData.setDoNotDisturb(false);
-        }
         globalRemainingSeconds.set(globalTotalSeconds.value);
-        globalShowSecondsOnly.set(globalRemainingSeconds.value < 60);
+        root.setShowSecondsOnly(globalRemainingSeconds.value < 60);
         globalTimerDisplayActive.set(false);
-        closeBreakModal();
+        root.closeBreakModal();
     }
 
     function getCountdownText(seconds, isVertical = false, barOnlyMinutes = false) {
@@ -1024,7 +1082,22 @@ PluginComponent {
     IpcHandler {
         function resetTimer(): string {
             root.resetTimer();
-            return "POMDORO_TIME_RESET_SUCCESS";
+            return "POMODORO_TIME_RESET_SUCCESS";
+        }
+
+        function status(): string {
+            return JSON.stringify({
+                state: globalTimerState.value,
+                running: globalIsRunning.value,
+                remaining: globalRemainingSeconds.value,
+                total: globalTotalSeconds.value,
+                displayActive: globalTimerDisplayActive.value,
+                completed: globalCompletedPomodoros.value,
+                modalOpen: root.breakModalOpen,
+                modalPhase: root.breakModalPhase,
+                locked: root.sessionLocked,
+                deferredPhase: root.deferredBreakModalPhase
+            });
         }
 
         function toggleTimer(): string {
@@ -1445,6 +1518,7 @@ PluginComponent {
         pluginRoot: root
         isOpen: root.breakModalOpen
         phase: root.breakModalPhase
+        running: globalIsRunning.value
         timerState: globalTimerState.value
         remainingSeconds: globalRemainingSeconds.value
         totalSeconds: globalTotalSeconds.value

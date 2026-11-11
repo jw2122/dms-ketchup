@@ -5,6 +5,24 @@
 - Namespaced by plugin id (`globalVars[pluginId][varName]`) — the same `varName` in different plugins is safe
 - **In-memory only** — never persisted to disk; the per-day `completedPomodoros-YYYY-MM-DD` keys are the durable store
 - Reactive via `PluginService.globalVarChanged(pluginId, varName)`
+- `setGlobalVar` always rebuilds the `globalVars` object and emits `globalVarChanged`, **even for an identical value** — guard write loops (the countdown display only writes when the formatted value changes)
+- `pluginData` is populated in the base `PluginComponent`'s own `Component.onCompleted`, after the derived widget's — read it from `Qt.callLater` / bindings, never inline during construction
+
+## Inherited signal handlers (QML)
+
+- A signal handler declared in a derived type (`onPluginServiceChanged:` in `DMSKetchupSettings.qml`) **replaces** the base type's handler instead of chaining. `PluginSettings` uses that handler to re-run `loadValue()` on its children, so overriding it made every setting widget keep its default while the stored values were ignored. Do not redeclare inherited handlers unless you replicate the base behaviour.
+- `PluginSettings` exposes only `pluginId`, `pluginService`, `settingChanged`, `variants` and the `settingChanged()` helper — it has **no** duration/data properties (`workDuration`, …). Read stored values via `pluginService.loadPluginData()`, or bind to the setting widgets' `value` (the About card uses the slider values).
+
+## Quickshell API
+
+- `Quickshell.primaryScreen` does not exist — use `Quickshell.screens[0]` (guard the empty list)
+- `Repeater` cannot host `PanelWindow` delegates — use `Variants` (see Multi-screen)
+- `Proc.runCommand` keys callbacks by id; per-instance ids avoid collisions between the two bar instances
+
+## Known upstream/dms-common issues (not changed)
+
+- `dms-common/SliderSettingPlus.qml` logs `Binding loop detected for property "width"` once per slider when the settings page opens (its label width is derived from the parent row width). Harmless, bounded to page open.
+- The same file elides long labels to "Wor… / Sho… / Lon…" in the narrow plugin settings pane; values and sliders still work.
 
 ## Plugin state
 
@@ -17,7 +35,15 @@
 
 - Each screen instantiates its own `PluginComponent`; **local properties are per-instance** — anything display-related that must match across screens must be a `PluginGlobalVar`
 - A shared blink counter would advance N× faster with N screens — derive blink phase from `Date.now()` instead
-- The fullscreen modal already spans all screens (`Repeater { model: Quickshell.screens }`, one `PanelWindow` each); the pre-warning toast is primary-screen only by design
+- The fullscreen modal spans all screens with `Variants { model: Quickshell.screens }`, one `PanelWindow` each; the pre-warning toast is primary-screen only by design
+- **Use `Variants`, never `Repeater`, for `PanelWindow` delegates.** `PanelWindow` is a `Window`, not an `Item`, so a `Repeater` delegate fails with "Delegate must be of Item type" and silently renders nothing (the overlay never appeared). `Variants` is the Quickshell container for non-`Item` delegates (the shell itself uses it for `Variants { model: Quickshell.screens }`).
+- Bar/dock insets are computed in `dms-common/BarInsets.js` (`edgeOffset()`), shared by the modal and the toast; the modal uses the same inset on left and right (`max(left, right)`) so an asymmetric bar layout cannot push the card off-centre.
+
+## Multi-instance initialisation
+
+- Each screen's plugin instance receives `onPluginServiceChanged`; without coordination the second instance re-ran the session reset a moment after the first had auto-started, leaving a paused timer and no display.
+- The fix is a shared `initAt` `PluginGlobalVar` stamp: the first instance within 5 s becomes `initializationOwner` and runs init + auto-start; the others bail out.
+- Similarly, `onWorkDurationChanged` / `onShortBreakDurationChanged` / `onLongBreakDurationChanged` only re-base the countdown when `globalTimerOwnerId.value === root.instanceId`. A second instance loading with fallback durations used to rewrite a running session's totals.
 
 ## SessionService (lock / suspend)
 
@@ -31,6 +57,7 @@
 - Both bar instances receive every lock/unlock signal, so per-instance away properties caused double `beginAway` and double reset/repeat. Away bookkeeping lives in shared `PluginGlobalVar`s (`awayActive`, `awayStartMs`, `awaySnapshot`, `awayCause`); the first instance to act wins and the second no-ops.
 - `PluginService.setGlobalVar` updates `globalVars` synchronously, so the check-and-set inside `beginAway`/`endAway` is race-free within one signal dispatch. Snapshots are plain JS objects — fine as `var`.
 - Unlock rule: `handleUnlocked()` cancels the snapshot when `isRunning` is true and runs `endAway()` only when the session is still paused. A session resumed from the lock screen therefore continues untouched.
+- With `autoStartWorkOnUnlock` on, a work session that the user had paused before locking is resumed after the away restore (remaining time kept, DND reapplied). Without this, the toggle kept the session paused even though its label promises "make sure a work session is running".
 - `lockPause` is "lock now": when locked, in a work session and no away is pending it calls `beginAway("lock")` (fresh timestamp). Otherwise it just pauses (breaks included).
 - `lockContinue` (also used for skip) clears `deferredBreakModalPhase` / `breakModalArmed`, closes the modal and starts a **running** work session — the same outcome as the modal's Continue button, without a second start on unlock.
 - Do not open the fullscreen break modal from `toggleTimer` while locked (`!root.sessionLocked`): it would cover the lock screen when resuming a paused break.
@@ -57,9 +84,15 @@
 ## Logging
 
 - `console.log` is debug-level and filtered out of `journalctl` (invisible!) — use `console.info` / `console.warn` / `console.error` for anything that must appear in the journal
+- `console.trace()` produced no output in this shell build
+
+## Reloading during development
+
+- `dms ipc call plugin-scan reload dmsKetchup` re-runs the plugin but can serve a **stale cached component**; a structural QML change (new file, delegate type, imports) needs a full `dms restart` before it takes effect
+- `dms ipc call plugin-scan rescan dmsKetchup` invalidates the manifest/component revisions, but the running component objects may still be cached — verify in the journal and with a screenshot
 
 ## Misc
 
-- Timer durations in `plugin_settings.json` are strings; always sanitize with `toDuration()`
-- `qmllint` is v1.0 (old) — `DMSKetchupWidget.qml` exits 255 with no message (pre-existing)
-- The widget's `onPluginServiceChanged` resets all globals on every shell start (fresh paused work session at full duration)
+- Timer durations are stored as numbers by the sliders, but old `plugin_settings.json` files may contain strings; always sanitize with `toDuration()`
+- The system `qmllint` may be Qt 5.15 (fails on `?.` and other modern syntax). Use `/usr/lib/qt6/bin/qmllint -I /run/user/1000/dms-shell/<hash> <file>`; parse errors are what matter (missing type warnings are expected for `qs.*` imports)
+- The widget's `onPluginServiceChanged` resets all globals on shell start — now only for the `initializationOwner` instance (see Multi-instance initialisation)

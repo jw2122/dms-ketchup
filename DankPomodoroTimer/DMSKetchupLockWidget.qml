@@ -49,19 +49,17 @@ DesktopPluginComponent {
         ? SettingsData.lockScreenFontFamily
         : Theme.fontFamily
 
+    // DesktopPluginComponent already keeps `pluginData` live through
+    // pluginDataChanged; reading it here (instead of calling loadPluginData
+    // once in a binding) also updates the card when settings change.
     readonly property real idleMinutes: {
-        if (!pluginService || !pluginId)
-            return 25;
-        const raw = pluginService.loadPluginData(pluginId, "workDuration", 25);
+        const raw = pluginData?.workDuration ?? 25;
         const parsed = parseFloat(String(raw).replace(",", "."));
         return isNaN(parsed) || parsed <= 0 ? 25 : parsed;
     }
 
     readonly property real sessionsPerLongBreak: {
-        if (!pluginService || !pluginId)
-            return 4;
-        const raw = pluginService.loadPluginData(pluginId, "sessionsPerLongBreak", 4);
-        const parsed = parseInt(raw, 10);
+        const parsed = parseInt(pluginData?.sessionsPerLongBreak ?? 4, 10);
         return isNaN(parsed) || parsed <= 0 ? 4 : parsed;
     }
 
