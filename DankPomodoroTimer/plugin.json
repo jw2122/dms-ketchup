@@ -1,12 +1,11 @@
 {
     "id": "dmsKetchup",
     "name": "DMS Ketchup",
-    "description": "Ketchup timer with break modal, sounds, and manual resume controls",
+    "description": "Pomodoro timer with a polished break overlay, media pausing, and a live lock-screen study timer",
     "version": "1.4.3",
     "license": "MIT",
     "author": "Virtual Wolf 369",
     "icon": "timer",
-    "firstParty": true,
     "component": "./DMSKetchupWidget.qml",
     "components": {
         "widget": "./DMSKetchupWidget.qml",
