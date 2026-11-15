@@ -17,6 +17,9 @@ This fork was developed with vibe coding. I’m saying that explicitly because I
 - Added custom sounds for session start/end
 - Added a transparent floating modal style that fits DMS
 - Added a cleaner inactive state for the bar panel
+- Added a live lock-screen study timer with manual start/stop controls
+- Added media pausing for the whole break, not only at the moment it starts
+- Added smarter unlock handling: a live session continues, while an idle or paused timer starts fresh at the full duration
 
 ## New additions
 
@@ -25,6 +28,8 @@ This fork was developed with vibe coding. I’m saying that explicitly because I
 - Translated settings panel and modal strings
 - Windowed modal behavior compatible with DMS transparency
 - A dedicated “no timer active” icon state
+- Lock-screen card shows live time, finish time, session number and the next break
+- Locking no longer interrupts a focus block when "Start pomodoro on unlock" is enabled
 
 ## Screenshots
 
@@ -40,6 +45,10 @@ Break modal close-up:
 
 ![DMS Ketchup break modal close-up](./docs/screenshots/break-modal-closeup.png)
 
+Lock-screen study timer:
+
+![DMS Ketchup lock-screen timer](./docs/screenshots/lock-screen.png)
+
 ## Upstream
 
 Original project: [Dank Pomodoro Timer](https://github.com/AvengeMedia/dms-plugins/tree/main/DankPomodoroTimer)
@@ -47,6 +56,8 @@ Original project: [Dank Pomodoro Timer](https://github.com/AvengeMedia/dms-plugi
 Repository: https://github.com/AvengeMedia/dms-plugins
 
 Upstream plugin path: `DankPomodoroTimer`
+
+This fork: https://github.com/jw2122/dms-ketchup
 
 ## Notes
 
