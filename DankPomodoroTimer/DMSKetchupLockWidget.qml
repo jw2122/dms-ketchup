@@ -100,17 +100,45 @@ DesktopPluginComponent {
         return mins + ":" + (secs < 10 ? "0" : "") + secs;
     }
 
-    function detailText() {
-        if (!active)
-            return tr("No session running", "No hay sesión activa");
-        const done = globalCompletedPomodoros.value % sessionsPerLongBreak;
-        const cycle = done === 0
-            ? (globalCompletedPomodoros.value > 0 ? sessionsPerLongBreak : 1)
-            : done;
-        return tr("Session " + cycle + " of " + sessionsPerLongBreak, "Sesión " + cycle + " de " + sessionsPerLongBreak);
+    // Number of the focus block currently in progress (or the one that just
+    // finished while a break is showing). The old formula showed "Session 1"
+    // for every focus block until the next completion.
+    function currentSessionNumber() {
+        const done = globalCompletedPomodoros.value;
+        const inCycle = done % sessionsPerLongBreak;
+        if (globalTimerState.value === "work")
+            return inCycle + 1;
+        return inCycle === 0 ? (done > 0 ? sessionsPerLongBreak : 1) : inCycle;
     }
 
-    function minutesLabel() {
+    function nextBreakIsLong() {
+        return (globalCompletedPomodoros.value + 1) % sessionsPerLongBreak === 0;
+    }
+
+    function detailText() {
+        if (!active)
+            return tr("Start a ", "Inicia una ") + Math.round(idleMinutes) + tr(" min session", " min de sesión");
+        const session = currentSessionNumber();
+        const base = tr("Session ", "Sesión ") + session + " / " + sessionsPerLongBreak;
+        if (breakComplete)
+            return tr("Ready for the next session", "Lista para la próxima sesión");
+        if (globalTimerState.value === "work") {
+            return base + (nextBreakIsLong()
+                ? tr(" · long break next", " · descanso largo después")
+                : tr(" · short break next", " · descanso corto después"));
+        }
+        return base + tr(" complete", " completada");
+    }
+
+    // The end time is more useful than the configured length when the card
+    // is used as a study timer on the lock screen.
+    function endLabel() {
+        if (breakComplete)
+            return "";
+        if (globalIsRunning.value && remainingSeconds > 0) {
+            const end = new Date(Date.now() + remainingSeconds * 1000);
+            return tr("ends ", "hasta ") + Qt.formatTime(end, "HH:mm");
+        }
         return Math.round(totalSeconds / 60) + " " + tr("min", "min");
     }
 
@@ -227,7 +255,7 @@ DesktopPluginComponent {
 
             StyledText {
                 id: minutesText
-                text: root.minutesLabel()
+                text: root.endLabel()
                 font.family: root.labelFont
                 font.pixelSize: Theme.fontSizeSmall
                 color: root.contentColor

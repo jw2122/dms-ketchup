@@ -2,7 +2,7 @@
     "id": "dmsKetchup",
     "name": "DMS Ketchup",
     "description": "Ketchup timer with break modal, sounds, and manual resume controls",
-    "version": "1.4.1",
+    "version": "1.4.3",
     "license": "MIT",
     "author": "Virtual Wolf 369",
     "icon": "timer",

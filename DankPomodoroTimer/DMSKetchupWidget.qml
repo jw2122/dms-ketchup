@@ -45,6 +45,7 @@ PluginComponent {
     property int preWarningTime: pluginData.preWarningTime ?? 10
     property int cycleResetHour: toIntSetting(pluginData.cycleResetHour, 4, 0, 23)
     property bool pauseMediaDuringBreaks: pluginData.pauseMediaDuringBreaks ?? true
+    readonly property bool breakRunning: (globalTimerState.value === "shortBreak" || globalTimerState.value === "longBreak") && globalIsRunning.value
     property string phraseLanguage: pluginData.phraseLanguage ?? "system"
     property var phraseTips: []
     property var phraseCandidates: []
@@ -445,6 +446,29 @@ PluginComponent {
     property string instanceId: Math.random().toString(36).substring(2)
     readonly property string statePluginId: "dmsKetchup"
 
+    // A break should not compete with music. Pausing once when the break
+    // starts is not enough: a player can start, resume, or appear later, so
+    // every available MPRIS player is watched while a break is running.
+    Instantiator {
+        model: root.pauseMediaDuringBreaks ? (typeof MprisController !== "undefined" && MprisController ? (MprisController.availablePlayers || []) : []) : []
+        delegate: QtObject {
+            required property var modelData
+            readonly property bool playerIsPlaying: modelData.isPlaying
+            readonly property bool playerCanPause: modelData.canPause
+            readonly property bool shouldPause: root.breakRunning && playerIsPlaying && playerCanPause
+
+            function enforce() {
+                if (shouldPause)
+                    modelData.pause();
+            }
+
+            // Fires when the break starts/resumes, when this player starts
+            // playing again, and when it becomes pausable.
+            onShouldPauseChanged: enforce()
+            Component.onCompleted: enforce()
+        }
+    }
+
     // PluginService.setGlobalVar always rebuilds the global object and emits
     // globalVarChanged, even for an identical value. Only write on changes.
     function setShowSecondsOnly(value) {
@@ -666,6 +690,17 @@ PluginComponent {
                 globalAwayCause.set("suspend");
             return;
         }
+        // Locking is not "away" when unlock auto-start is enabled: the focus
+        // countdown keeps running, which is exactly what the lock-screen
+        // widget needs for a study session (the laptop sits locked next to
+        // you). Suspends still snapshot and pause, so wall-clock sleep time
+        // cannot silently burn a session.
+        if (cause === "lock" && root.autoStartWorkOnUnlock) {
+            // The session keeps running, so no snapshot/pause — but an
+            // already-open pre-warning toast must not stay over the lock layer.
+            root.closePreWarning();
+            return;
+        }
         const state = globalTimerState.value;
         if (state === "work") {
             const snapshot = {
@@ -793,25 +828,35 @@ PluginComponent {
             return;
         globalUnlockHandledAt.set(now);
 
-        // Only apply the away reset/repeat logic when the session is still
-        // paused. A session that was resumed from the lock screen is a
-        // deliberate "I'm working" signal, so it simply continues.
-        if (globalIsRunning.value)
+        // A live session owns its countdown across lock/unlock. Only re-open
+        // a break modal that had to be deferred when the screen locked; never
+        // reset a running focus or break session here.
+        if (globalIsRunning.value) {
             root.cancelAway();
-        else
-            root.endAway();
-        // A break that finished while the screen was locked either deferred its
-        // modal (probe/startup path) or opened it directly behind the lock
-        // screen (default loginctl-signal path) — catch both.
-        const breakFinished = root.deferredBreakModalPhase === "complete"
-            || (root.breakModalOpen && root.breakModalPhase === "complete");
-        if (root.autoStartWorkOnUnlock && breakFinished) {
+            if (root.deferredBreakModalPhase !== "") {
+                let runningPhase = root.deferredBreakModalPhase;
+                root.deferredBreakModalPhase = "";
+                openBreakModal(runningPhase);
+            }
+            return;
+        }
+
+        if (root.autoStartWorkOnUnlock) {
+            // Nothing live (idle, paused, or a break that already finished):
+            // unlocking begins the next focus block from the top instead of
+            // resuming a stale countdown or replaying the away/break logic.
+            root.cancelAway();
             root.deferredBreakModalPhase = "";
             root.breakModalArmed = false;
             root.closeBreakModal();
             root.startWork(true, true);
             return;
         }
+
+        root.endAway();
+        // A break that finished while the screen was locked either deferred its
+        // modal (probe/startup path) or opened it directly behind the lock
+        // screen (default loginctl-signal path) — catch both.
         if (root.deferredBreakModalPhase !== "") {
             let phase = root.deferredBreakModalPhase;
             root.deferredBreakModalPhase = "";
@@ -820,17 +865,6 @@ PluginComponent {
             if (root.breakModalOpen && root.breakModalPhase === "complete")
                 phase = "complete";
             openBreakModal(phase);
-        } else if (root.autoStartWorkOnUnlock && !globalTimerDisplayActive.value) {
-            // No session running at all (fresh boot or reset) — start one
-            root.startWork(true, true);
-        } else if (root.autoStartWorkOnUnlock
-                   && globalTimerState.value === "work"
-                   && !globalIsRunning.value) {
-            // The user paused the work session before locking. "Start
-            // pomodoro on unlock" means the session must be running again;
-            // resume it (keeping the remaining time) instead of leaving a
-            // paused timer behind the unlock.
-            root.toggleTimer();
         }
     }
 
@@ -860,11 +894,10 @@ PluginComponent {
     function lockPause() {
         if (!globalIsRunning.value)
             return;
-        if ((root.sessionLocked || SessionService.locked) && !globalAwayActive.value && globalTimerState.value === "work") {
-            // "As if I locked the screen now": snapshot + pause from this point
-            root.beginAway("lock");
-            return;
-        }
+        // Locking no longer pauses a work session, so this is a plain manual
+        // pause. Cancelling any away snapshot keeps a later unlock from
+        // treating this deliberate pause as an expired away period.
+        root.cancelAway();
         globalIsRunning.set(false);
         root.closePreWarning();
     }

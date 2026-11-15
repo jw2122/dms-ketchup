@@ -2,7 +2,7 @@
 
 DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
-- Plugin id: `dmsKetchup` (author: Virtual Wolf 369, version 1.4.1, MIT)
+- Plugin id: `dmsKetchup` (author: Virtual Wolf 369, version 1.4.3, MIT)
 - Source repo: `~/.config/DankMaterialShell/plugins/.repos/39b15ac4661f477a/DankPomodoroTimer/`
 
 ## Files
@@ -54,13 +54,14 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 ## Lock-screen / desktop widget
 
-- `DMSKetchupLockWidget.qml` extends `DesktopPluginComponent` and renders a glass-style card: state dot + label (READY / FOCUS / PAUSED / BREAK COMPLETE / SHORT|LONG BREAK), large monospace countdown, progress bar, "Session N of M" footer, session length and a two-button control row. Default/minimum size is 340×180 / 240×140.
+- `DMSKetchupLockWidget.qml` extends `DesktopPluginComponent` and renders a glass-style card: state dot + label (READY / FOCUS / PAUSED / BREAK COMPLETE / SHORT|LONG BREAK), large monospace countdown, progress bar, session/next-break footer and a two-button control row. Default/minimum size is 340×180 / 240×140.
 - It owns no timer: it reads the bar widget's shared `PluginGlobalVar`s (`remainingSeconds`, `totalSeconds`, `isRunning`, `timerState`, `completedPomodoros`, `timerDisplayActive`), so the lock screen always mirrors the live session.
+- It is meant to work as a **study timer on the lock screen**: a running focus block keeps counting down while the laptop is locked, and the card shows the live remaining time, the finish time ("ends 11:29"), the current session number and whether the next break is short or long. The old footer showed the wrong session during a focus block (always the last completed one).
 - Controls call the bar widget's IPC target (`lockStart`, `lockPause`, `lockResume`, `lockContinue`) through `Quickshell.execDetached(["dms", "ipc", "call", "pomodoroTimer", ...])`, so there is still exactly one engine and one session owner. The primary 34 px circle is play/pause/start/continue in `Theme.primary` with `Theme.primaryText`; the tonal 34 px circle skips a running break.
-- Button mapping: READY → start a running work session; work running → pause (= "as if the screen had just locked", see Away); work paused → resume and drop the away snapshot; break running → pause/resume the break; break running + skip → jump to the next work session; break complete → continue (clear the deferred modal, start work).
+- Button mapping: READY (idle) → start a fresh running work session at the full duration (the lock screen never auto-starts a work block); work running → plain pause; work paused → resume and keep the remaining time; break running → pause/resume the break; break running + skip → jump to the next work session; break complete → continue with a fresh work session.
 - The row is inert in the widget editor / lock-screen demo (`lockHost.demoMode`), so previews cannot drive the timer.
 - On the lock screen it uses `lockHost.contentColor(...)`, `SettingsData.lockScreenFontFamily` for labels, and `Theme.readableSurface` / `Theme.outlineMedium` for the card; on the desktop it uses `Theme.surfaceText` and `Theme.fontFamily`.
-- Idle state (no session) shows the configured work duration and "No session running"; session numbering starts at 1 and wraps to `sessionsPerLongBreak` after a full cycle.
+- Idle state (no session) shows the configured work duration, "25:00" and "Start a 25 min session"; session numbering during a focus block is `completed % N + 1`, and during a break it shows the session that just finished.
 - The user instance lives in `settings.json` → `lockScreenWidgetInstances` (`widgetType: "dmsKetchup"`); its position is stored in `session.json` → `desktopWidgetInstancePositions.lock_ketchup` (`_synced`, top-right, 340×180).
 
 ## Session flow
@@ -74,11 +75,11 @@ DMS Ketchup is a pomodoro timer plugin for DankMaterialShell.
 
 All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals, plus the loginctl probe fallback) funnel into `handleUnlocked()`. With the toggle on:
 
-- Break finished while the screen was locked (deferred `"complete"` modal, or the modal opened behind the lock screen in the default loginctl-signal config) -> next work session starts immediately as a **running** session (the unlock toggle is the explicit user choice), no modal
-- Break still counting down while locked -> modal re-opens as before (a live break is not cut short)
-- Work session was **running** (e.g. resumed from the lock screen) -> it simply keeps running; the stale away snapshot is discarded (`cancelAway()`), so no reset/repeat happens
-- Work session was **paused** -> today's away restore/repeat/reset logic applies; with `autoStartWorkOnUnlock` on, a paused work session is then resumed (remaining time kept) instead of staying paused. With the toggle off it stays paused.
-- No session running at all (fresh boot, or after Reset) -> a fresh work session starts — "whenever I want to use the device"
+- A **live** session (work or break, `isRunning` true) survives lock/unlock untouched: the countdown keeps its remaining time, no away snapshot is replayed, and a break modal that was deferred at lock time re-opens. This is what makes locking the laptop during a study block safe.
+- **Nothing live** (idle, manually paused, or a break that already finished) -> unlock starts a **fresh work session at the full `workDuration` (25:00)**, running. It does not resume a stale countdown and does not replay the away break/reset table.
+- Break finished while locked (deferred `"complete"` modal or the modal behind the lock screen) -> the same fresh work session starts, no modal.
+- The away reset/repeat table is only used when `autoStartWorkOnUnlock` is **off**; with it on, unlock is an explicit "start my next focus block" action.
+- The lock screen itself never auto-starts a work block; while locked, an idle timer stays READY until the user presses Start (or unlocks).
 
 ## Startup behavior (`autoStartWorkOnStartup`, default off)
 
@@ -90,9 +91,12 @@ All unlock paths (`SessionService` `sessionUnlocked` / `sessionResumed` signals,
 
 - Media is paused when a break countdown **actually starts running**: auto-started breaks (natural completion, cycle break, IPC) and the manual start (popout play button → `toggleTimer`)
 - Every Mpris player with `isPlaying && canPause` is paused via `MprisController.availablePlayers`
+- Pausing is **continuous while a break runs**: an `Instantiator` tracks every available player's `isPlaying` / `canPause` and pauses it again if it starts or resumes mid-break (including players that only appear after the break started). Rewinding or changing tracks without an actual stop does not retrigger it.
+- A **paused break allows media**: enforcement is gated on `globalIsRunning`, so manually pausing the break frees the players, and resuming the break re-pauses them
 - The quick-action buttons only **arm** a break (countdown at full duration, not running) — they do not pause media; the pause happens when the user presses play
-- There is deliberately **no resume**: players stay paused until the user resumes them
-- Setting `pauseMediaDuringBreaks` (default on) disables the pause entirely
+- Work sessions are never affected
+- There is deliberately **no resume**: players stay paused until the user resumes them (during a running break they will be paused again) or the break ends
+- Setting `pauseMediaDuringBreaks` (default on) disables the pause entirely (the watcher model is emptied)
 
 ## Motivational phrases
 
@@ -142,12 +146,14 @@ Target `pomodoroTimer`: `resetTimer`, `toggleTimer`, `startWork`, `startShortBre
 
 Departure (screen lock or lid close):
 
-- **Work session**: timer pauses, state snapshotted (cause `lock`)
+- **Work session + screen lock, `autoStartWorkOnUnlock` on**: nothing — the countdown keeps running so the lock screen works as a live study display. No snapshot, no pause, no "away".
+- **Work session + screen lock, toggle off**: timer pauses, state snapshotted (cause `lock`) — the legacy away behavior.
+- **Work session + suspend**: snapshot + pause in both modes; wall-clock sleep time must not silently burn a focus block.
 - **Break + screen lock**: nothing — breaks keep running while the machine stays on; a break completing while locked defers its modal to unlock
 - **Break + suspend**: the break's remaining time is snapshotted — breaks are not paused, the away time counts against them
-- **Pause from the lock screen**: treated as locking *again* at that moment — a fresh snapshot with a fresh timestamp replaces the old one (if no away snapshot exists yet, one is created)
+- **Pause from the lock screen**: plain pause (no snapshot); a live work session is no longer treated as "locking again"
 
-Return:
+Return (`autoStartWorkOnUnlock` **off** — legacy table):
 
 | Phase | Time away | On return |
 | --- | --- | --- |
@@ -156,6 +162,8 @@ Return:
 | work | >= `longBreakDuration` | Cycle counter reset to 0 + fresh work session |
 | break (suspend) | remaining − away > 0 | Break continues with the reduced remaining time |
 | break (suspend) | remaining − away <= 0 | Break treated as finished -> break-complete flow (next work session) |
+
+Return with `autoStartWorkOnUnlock` **on**: a live session keeps its remaining time; anything idle/paused starts fresh at `workDuration` (see Unlock behavior). The away table above is not replayed.
 
 - Screen unlock / resume consumes the deferred break modal (the old `deferredBreakModalPhase` was written but never read — fixed)
 - The deferred phase is **preserved** at lock time: a "complete" modal (break finished, waiting for continue) stays "complete" — it used to be hardcoded to "running", which re-opened a 0:00 running overlay with a Skip button instead of the continue screen. `handleUnlocked()` also upgrades a stale "running" phase to "complete" when the modal already re-opened as "complete" behind the lock screen.

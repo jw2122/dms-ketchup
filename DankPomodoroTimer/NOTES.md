@@ -56,12 +56,20 @@
 
 - Both bar instances receive every lock/unlock signal, so per-instance away properties caused double `beginAway` and double reset/repeat. Away bookkeeping lives in shared `PluginGlobalVar`s (`awayActive`, `awayStartMs`, `awaySnapshot`, `awayCause`); the first instance to act wins and the second no-ops.
 - `PluginService.setGlobalVar` updates `globalVars` synchronously, so the check-and-set inside `beginAway`/`endAway` is race-free within one signal dispatch. Snapshots are plain JS objects — fine as `var`.
-- Unlock rule: `handleUnlocked()` cancels the snapshot when `isRunning` is true and runs `endAway()` only when the session is still paused. A session resumed from the lock screen therefore continues untouched.
-- With `autoStartWorkOnUnlock` on, a work session that the user had paused before locking is resumed after the away restore (remaining time kept, DND reapplied). Without this, the toggle kept the session paused even though its label promises "make sure a work session is running".
-- `lockPause` is "lock now": when locked, in a work session and no away is pending it calls `beginAway("lock")` (fresh timestamp). Otherwise it just pauses (breaks included).
+- Unlock rule with `autoStartWorkOnUnlock` on: a live session (`isRunning` true, work or break) keeps its countdown untouched and only re-opens a deferred break modal. If nothing is live (idle, paused, break finished), unlock starts a **fresh** work session at the full `workDuration` — it must not resume a stale countdown and must not replay the away table.
+- With `autoStartWorkOnUnlock` **off**, the legacy behavior remains: `handleUnlocked()` cancels the snapshot when `isRunning` is true and runs `endAway()` when paused.
+- With `autoStartWorkOnUnlock` on, `beginAway("lock")` is a no-op for work sessions: locking keeps the focus countdown running, which is what makes the lock screen useful as a study timer. `beginAway("suspend")` still snapshots and pauses.
+- `lockPause` is now a plain pause (and `cancelAway()`), because a work session is no longer snapshotted at lock time. Calling `beginAway("lock")` from it would silently do nothing under the new rule.
 - `lockContinue` (also used for skip) clears `deferredBreakModalPhase` / `breakModalArmed`, closes the modal and starts a **running** work session — the same outcome as the modal's Continue button, without a second start on unlock.
 - Do not open the fullscreen break modal from `toggleTimer` while locked (`!root.sessionLocked`): it would cover the lock screen when resuming a paused break.
 - The lock widget drives all of this with `Quickshell.execDetached(["dms", "ipc", "call", "pomodoroTimer", action])`; buttons are disabled (opacity 0.4) in the editor/demo via `lockHost.demoMode`.
+
+## Lock-screen study mode
+
+- The card is used while the laptop sits locked next to the user (studying). It therefore shows the **live** remaining time, the finish time (`ends HH:MM`), the current session and whether the next break is short or long.
+- Session number during a focus block is `completedPomodoros % sessionsPerLongBreak + 1`; during a break it is the session that just finished (`% N`, with `0` → `N`). The previous formula showed "Session 1" for every focus block.
+- `endLabel()` recomputes from `remainingSeconds`, which ticks every second, so the finish time stays stable while the countdown runs. It is only a `Date.now()` read inside a binding — no extra timer.
+- The lock screen never auto-starts a work block; idle shows READY + 25:00 + "Start a 25 min session", and the play button calls `lockStart`.
 
 ## Hyprland lock gotcha
 
@@ -85,6 +93,13 @@
 
 - `console.log` is debug-level and filtered out of `journalctl` (invisible!) — use `console.info` / `console.warn` / `console.error` for anything that must appear in the journal
 - `console.trace()` produced no output in this shell build
+
+## Media pause enforcement
+
+- `pauseMediaPlayers()` covers only the moment a break starts. Continuous enforcement lives in an `Instantiator` over `MprisController.availablePlayers` in `DMSKetchupWidget.qml`: the delegate pauses when `root.breakRunning && modelData.isPlaying && modelData.canPause` becomes true.
+- Always re-check on `Component.onCompleted` too — a player can appear (delegate created) with the break already running, when no property-change signal fires.
+- Keep the model empty while `pauseMediaDuringBreaks` is off rather than checking the setting inside `enforce()`; that way toggling the setting starts/stops enforcement immediately.
+- There is no resume on purpose. Media resumed during a *paused* break stays playing; resuming the break pauses it again.
 
 ## Reloading during development
 

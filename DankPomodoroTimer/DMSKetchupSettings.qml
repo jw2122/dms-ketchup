@@ -247,7 +247,7 @@ PluginSettings {
             ToggleSetting {
                 settingKey: "autoStartWorkOnUnlock"
                 label: root.tr("Start pomodoro on unlock", "Iniciar pomodoro al desbloquear")
-                description: root.tr("Whenever you unlock the screen, make sure a work session is running — continues after a break that finished while locked, or starts a fresh one if none was running", "Al desbloquear la pantalla, asegura que haya una sesión de trabajo activa: continúa después de un descanso que terminó mientras la pantalla estaba bloqueada, o inicia una nueva si no había ninguna")
+                description: root.tr("Keep the focus countdown running while the screen is locked (the lock widget works as a live study timer), and on unlock make sure a work session is running: a live one continues, otherwise a fresh full-length session starts", "Mantén la cuenta atrás de enfoque activa mientras la pantalla está bloqueada (el widget de bloqueo funciona como temporizador de estudio en vivo) y, al desbloquear, asegura que haya una sesión de trabajo: una activa continúa; si no, empieza una nueva sesión completa")
                 defaultValue: false
             }
 
